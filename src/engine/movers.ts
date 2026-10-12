@@ -187,9 +187,12 @@ export class MoverSystem {
       vmax = emergency ? Math.min(p.vehicleEmergencySpeedMps, lim * this.d.params.nav.emergencySpeedFactor) : Math.min(p.vehicleSpeedMps, lim);
     }
     let factor = 1;
+    let floorSpeed = 0;
     if (vehicle) {
       const s = st.vehState[edge] as number;
       factor = s === 0 ? 1 : s === 1 ? 0.7 : 0.35;
+      // plancher : avertisseurs allumés, on n'est jamais plus lent que sans avertisseurs sur la même rue
+      floorSpeed = emergency ? Math.min(p.vehicleSpeedMps, this.d.nav.vehicleSpeedOn(edge) || 4) * factor : 0;
       // avertisseurs actifs : on ralentit à l'approche d'une foule, sinon on roule à pleine vitesse
       if (emergency) {
         for (let k = ei; k < r.edges.length; k++) {
@@ -203,7 +206,7 @@ export class MoverSystem {
       }
     } else factor = st.speedFactor[edge] as number;
     const brake = Math.sqrt(Math.max(0, 2 * decel * Math.max(0, remaining - p.arrivalToleranceM * 0.5)));
-    const target = Math.min(vmax * factor, brake);
+    const target = Math.min(Math.max(vmax * factor, floorSpeed), brake);
     if (e.speedMps < target) e.speedMps = Math.min(target, e.speedMps + accel * dt);
     else e.speedMps = Math.max(target, e.speedMps - decel * dt);
     e.routeS = Math.min(r.length, e.routeS + e.speedMps * dt);

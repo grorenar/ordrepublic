@@ -84,3 +84,32 @@ describe('avertisseurs lumineux des véhicules', () => {
     expect(vNear).toBeLessThan(vFree * 0.6);
   }, 60_000);
 });
+
+describe('avertisseurs et foule : jamais plus lent que sans avertisseurs', () => {
+  it('à travers une foule, le véhicule avec avertisseurs roule au moins aussi vite que sans', () => {
+    const speed = (on: boolean) => {
+      const graph = gridGraph({ cols: 6, rows: 1, spacing: 100, width: 12 });
+      const sim = new Sim({ graph, seed: 1 });
+      sim.createGroup({ label: 'Foule', kind: 'static', size: 120, origin: { x: 0, y: 0 }, anchor: anchorAt({ x: 0, y: 0 }, 'foule', 12) }, PLAN);
+      sim.run(100);
+      const id = sim.addVehicle({ vehicle: 'fourgon_police', callsign: 'F-1', crew: 3, pos: { x: -250, y: 0 } }, PLAN);
+      const v = sim.entity(id)!;
+      if (on) sim.issueOrder({ kind: 'lights', ids: [id], on: true });
+      sim.issueOrder({ kind: 'move', ids: [id], target: { x: 250, y: 0 } });
+      let sum = 0;
+      let n = 0;
+      for (let t = 0; t < 400; t++) {
+        sim.step();
+        if (Math.abs(v.x) < 60) {
+          sum += v.speedMps;
+          n++;
+        }
+      }
+      return n ? sum / n : 0;
+    };
+    const off = speed(false);
+    const on = speed(true);
+    expect(off).toBeGreaterThan(0);
+    expect(on).toBeGreaterThanOrEqual(off - 0.05);
+  });
+});
