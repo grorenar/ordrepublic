@@ -68,7 +68,7 @@ function def(id: string, family: SpriteFamily, label: string, wM: number, hM: nu
 /** Manifeste des sprites provisoires (dessinés par code). Une planche d'images peut remplacer n'importe quelle entrée. */
 export function defaultManifest(): SpriteManifest {
   const sprites: SpriteDef[] = [];
-  sprites.push(def(PERSON_SPRITE, 'person', 'Manifestant', 0.5, 0.62, { orientations: 8, animations: { idle: 1, walk: 3 }, variants: PERSON_VARIANTS, hitRadiusM: 1.2, minPx: 5 }));
+  sprites.push(def(PERSON_SPRITE, 'person', 'Manifestant', 0.65, 0.8, { orientations: 8, animations: { idle: 1, walk: 3 }, variants: PERSON_VARIANTS, hitRadiusM: 1.2, minPx: 6.5 }));
   const forceLabels: Record<ForceKind, string> = { crs: 'CRS', police_nationale: 'Police nationale', gendarmerie_mobile: 'Gendarmerie mobile', unite_speciale: 'Unité spéciale' };
   for (const k of Object.keys(FORCE_CODES) as ForceKind[]) {
     for (const eq of ['shield', 'bare', ...(k === 'unite_speciale' ? ['helmet'] : [])]) {

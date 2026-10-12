@@ -115,8 +115,8 @@ describe('fournisseur procédural', () => {
     const small = p.get(q({ ppm: 4 })) as NonNullable<ReturnType<typeof p.get>>;
     const tiny = p.get(q({ ppm: 0.2 })) as NonNullable<ReturnType<typeof p.get>>;
     expect(big.w).toBeGreaterThan(small.w);
-    expect(Math.max(tiny.w, tiny.h)).toBeGreaterThanOrEqual(5 - 1e-6); // minPx du sprite de personne
-    expect(big.w).toBeCloseTo(Math.hypot(0.5, 0.62) * 40, 0);
+    expect(Math.max(tiny.w, tiny.h)).toBeGreaterThanOrEqual(6.5 - 1e-6); // minPx du sprite de personne
+    expect(big.w).toBeCloseTo(Math.hypot(0.65, 0.8) * 40, 0);
   });
 
   it('une échelle voisine réutilise la même cellule d’atlas (quantification), mais s’affiche à la taille exacte', () => {

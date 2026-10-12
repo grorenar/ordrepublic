@@ -88,3 +88,6 @@ export const DEFAULT_ZOOM = 17;
 /** Style vectoriel dont on reprend les noms (rues, lieux) et contours de bâtiments pour la vue mixte. */
 export const OPENFREEMAP_STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty';
 export const OPENFREEMAP_GLYPHS = 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf';
+
+/** Zoom maximal de la vue (au-delà du dernier niveau de tuiles : les tuiles sont agrandies). Permet de bien voir les silhouettes. */
+export const MAX_VIEW_ZOOM = 21;

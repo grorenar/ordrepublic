@@ -3,7 +3,7 @@ import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { Bounds, LngLat, ViewState } from '../geo/mercator';
 import { hybridOverlay } from './hybrid';
-import { MAP_PROVIDERS, MIN_ZOOM, OPENFREEMAP_GLYPHS, OPENFREEMAP_STYLE_URL, STYLE_LOAD_TIMEOUT_MS, type MapProviderId } from '../config/mapConfig';
+import { MAP_PROVIDERS, MAX_VIEW_ZOOM, MIN_ZOOM, OPENFREEMAP_GLYPHS, OPENFREEMAP_STYLE_URL, STYLE_LOAD_TIMEOUT_MS, type MapProviderId } from '../config/mapConfig';
 import type { MapAdapter, MapStatus } from './MapAdapter';
 
 export interface MapLibreOptions {
@@ -113,7 +113,7 @@ export class MapLibreAdapter implements MapAdapter {
       center: [opts.center.lng, opts.center.lat],
       zoom: opts.zoom,
       minZoom: MIN_ZOOM,
-      maxZoom: MAP_PROVIDERS[opts.provider].maxZoom,
+      maxZoom: Math.max(MAX_VIEW_ZOOM, MAP_PROVIDERS[opts.provider].maxZoom),
       dragRotate: false,
       pitchWithRotate: false,
       touchPitch: false,

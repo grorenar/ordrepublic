@@ -28,7 +28,7 @@ import {
 } from '../geo/schematicCity';
 
 const MIN_Z = 12;
-const MAX_Z = 19.5;
+const MAX_Z = 21;
 
 /**
  * Fond schématique autonome : aucune requête réseau, aucune donnée cartographique réelle.

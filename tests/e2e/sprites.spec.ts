@@ -13,7 +13,7 @@ test.describe('sprites provisoires', () => {
 });
 
 test.describe('sprites dans le jeu', () => {
-  for (const zoom of [17.4, 18.3, 19]) {
+  for (const zoom of [17.4, 18.3, 19, 20.5]) {
     test(`zoom ${zoom} : silhouettes ou points dessinés, jeu fluide, aucune erreur`, async ({ page }, testInfo) => {
       const errors: string[] = [];
       page.on('pageerror', (e) => errors.push(e.message));
