@@ -39,7 +39,7 @@ export function saveSettings(s: Settings, storage: Pick<Storage, 'setItem'> | un
 
 export function sanitize(input: unknown): Settings {
   const o = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
-  const providers: MapProviderId[] = ['openfreemap', 'osm-raster', 'custom-style', 'test-local'];
+  const providers: MapProviderId[] = ['openfreemap', 'osm-raster', 'ign-aerial', 'custom-style', 'test-local'];
   return {
     provider: providers.includes(o.provider as MapProviderId) ? (o.provider as MapProviderId) : DEFAULT_SETTINGS.provider,
     customStyleUrl: typeof o.customStyleUrl === 'string' ? o.customStyleUrl : '',

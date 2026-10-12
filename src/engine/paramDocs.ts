@@ -27,10 +27,11 @@ export const PARAM_DOCS: ParamDoc[] = [
   // --- densités et géométrie
   { path: 'marchDensity', group: 'Densités et géométrie', unit: 'personnes/m²', meaning: 'Densité d’un cortège en marche.', effect: 'Longueur de colonne = effectif / (densité × largeur du front). Doit rester < `nav.jamDensity` (validé).' },
   { path: 'staticDensity', group: 'Densités et géométrie', unit: 'personnes/m²', meaning: 'Densité d’un rassemblement installé.', effect: 'Aire occupée = effectif / densité (rayon de la zone praticable). Détermine aussi la largeur de rue occupée donc le blocage. Doit rester < `nav.jamDensity` (validé).' },
+  { path: 'marchDensityMin', group: 'Densités et géométrie', unit: 'personnes/m²', meaning: 'Densité minimale d’un cortège qui s’étale dans un espace large.', effect: 'Au-delà de la largeur de front des rues, le front s’élargit et la densité diminue (jusqu’à ce plancher) : les gens se séparent les uns des autres sans ralentir ni allonger la colonne.' },
   { path: 'marchFrontWidthMaxM', group: 'Densités et géométrie', unit: 'm', meaning: 'Largeur maximale du front d’un cortège.', effect: 'Un cortège plus large que la rue se réduit à la largeur disponible (moins marges) ; au-delà de cette valeur il s’allonge.' },
   { path: 'marchFrontWidthMinM', group: 'Densités et géométrie', unit: 'm', meaning: 'Largeur minimale du front : un petit groupe forme un bloc compact.', effect: 'Largeur du front = √(effectif / densité), bornée par ce minimum et le maximum.' },
   { path: 'arrivalZoneM', group: 'Densités et géométrie', unit: 'm', meaning: 'Rayon autour d’une destination où un groupe (ou une unité à pied) peut traverser une foule dense pour la rejoindre.', effect: 'Évite qu’un rassemblement existant ferme l’accès à sa propre place. Les véhicules ne traversent jamais une foule.' },
-  { path: 'speedFactorByClass.*', group: 'Vitesses des groupes', unit: 'multiple', meaning: 'Facteur de vitesse d’un cortège selon la classe de la voie (0 grand axe … 10 escaliers, 11 piste).', effect: 'Un cortège accélère sur un boulevard (×1,1) et ralentit en ruelle (×0,8), sentier (×0,75), escaliers (×0,5). Moyenne des facteurs sous le centre et la tête de la colonne.' },
+  { path: 'speedFactorByClass.*', group: 'Vitesses des groupes', unit: 'multiple', meaning: 'Facteur de vitesse d’un cortège selon la classe de la voie (0 grand axe … 10 escaliers, 11 piste).', effect: 'Nuances modérées : un peu plus vite sur un grand axe (×1,05), un peu moins en voie de service (×0,92), sentier (×0,85), escaliers (×0,6). Moyenne des facteurs sous le centre et la tête de la colonne.' },
   { path: 'crowdAccelMps2', group: 'Vitesses des groupes', unit: 'm/s²', meaning: 'Accélération maximale d’un cortège (le freinage est deux fois plus fort).', effect: 'Lisse les changements de vitesse (type de rue, foule devant) : pas de saut de vitesse.' },
   { path: 'waitDensity', group: 'Densités et géométrie', unit: 'personnes/m²', meaning: 'Densité d’un cortège arrêté et bloqué.', effect: 'La colonne se tasse en bloc contre l’obstacle (longueur = effectif / (densité × largeur praticable)), tête immobile ; doit rester < nav.jamDensity.' },
   { path: 'walkHalfWidthMaxM', group: 'Densités et géométrie', unit: 'm', meaning: 'Demi-largeur praticable maximale de chaque côté de l’axe d’une rue (espaces ouverts compris).', effect: 'Plafonne l’étalement d’une foule sur une place ou une esplanade.' },
@@ -40,6 +41,7 @@ export const PARAM_DOCS: ParamDoc[] = [
   { path: 'densityRatePerS', group: 'Densités et géométrie', unit: 'personnes/m² par s', meaning: 'Vitesse maximale de variation de la densité d’un cortège qui se tasse (bloqué) ou se relâche.', effect: 'Durée du tassement : (waitDensity − marchDensity) / densityRatePerS.' },
   { path: 'walkWidthSampleEveryM', group: 'Densités et géométrie', unit: 'm', meaning: 'Intervalle entre points de mesure de la largeur praticable le long d’une rue.', effect: 'Plus petit : mesure plus fine, calcul initial plus long.' },
   { path: 'sidewalkAllowanceM', group: 'Densités et géométrie', unit: 'm', meaning: 'Trottoir supposé de chaque côté d’une rue ouverte aux véhicules quand aucun bâtiment ne permet de mesurer.', effect: 'Largeur praticable = chaussée + 2 × trottoir. Sans effet quand les bâtiments sont connus (largeur mesurée façade à façade).' },
+  { path: 'entryBufferM', group: 'Densités et géométrie', unit: 'm', meaning: 'Distance derrière une porte d’entrée au-delà de laquelle un individu est hors de la zone (aucune rue connue).', effect: 'Les individus d’une colonne qui arrive par une porte sont invisibles tant qu’ils n’ont pas franchi la porte : pas de foule posée à travers les immeubles à l’apparition.' },
   { path: 'streetMarginM', group: 'Densités et géométrie', unit: 'm', meaning: 'Marge entre un cortège et le bord de la rue.', effect: 'Réduit la largeur utile du front (2 marges retirées de la largeur de rue).' },
   { path: 'columnLengthRateMps', group: 'Densités et géométrie', unit: 'm/s', meaning: 'Vitesse maximale de variation de la longueur de colonne.', effect: 'Lisse l’allongement/raccourcissement quand la largeur de rue change : aucun saut de position.' },
   { path: 'staticMaxRadiusM', group: 'Densités et géométrie', unit: 'm', meaning: 'Rayon maximal exploré pour placer un rassemblement statique.', effect: 'Au-delà, la densité effective augmente (journalisé) ; borne le coût de mise en place.' },
@@ -120,6 +122,7 @@ export function validateSimParams(p: SimParams): ParamIssues {
   const warnings: string[] = [];
   const n = p.nav;
   const positive: Array<[string, number]> = [
+    ['marchDensityMin', p.marchDensityMin],
     ['tickMs', p.tickMs],
     ['marchDensity', p.marchDensity],
     ['staticDensity', p.staticDensity],
@@ -136,6 +139,7 @@ export function validateSimParams(p: SimParams): ParamIssues {
     ['lod.blockSize', p.lod.blockSize],
   ];
   for (const [k, v] of positive) if (!(v > 0) || !Number.isFinite(v)) errors.push(`${k} doit être un nombre strictement positif (reçu ${v}).`);
+  if (p.marchDensityMin > p.marchDensity) errors.push('marchDensityMin ne peut pas dépasser marchDensity.');
   if (p.marchFrontWidthMinM > p.marchFrontWidthMaxM) errors.push('marchFrontWidthMinM ne peut pas dépasser marchFrontWidthMaxM.');
   // cohérence densités ↔ blocage
   if (p.marchDensity >= n.jamDensity) errors.push(`marchDensity (${p.marchDensity}) ≥ nav.jamDensity (${n.jamDensity}) : un cortège saturerait lui-même sa rue et se bloquerait.`);

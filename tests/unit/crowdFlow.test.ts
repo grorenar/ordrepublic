@@ -69,7 +69,7 @@ describe('la vitesse d’un cortège dépend du type de rue', () => {
     expect(primary.v).toBeGreaterThan(resid.v);
     expect(resid.v).toBeGreaterThan(service.v);
     expect(service.v).toBeGreaterThan(steps.v);
-    expect(steps.v).toBeCloseTo(1.1 * 0.5, 1);
+    expect(steps.v).toBeCloseTo(1.1 * 0.6, 1);
     expect(steps.cause).toContain('escaliers');
     expect(primary.cause).toContain('plus rapide');
   });

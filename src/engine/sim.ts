@@ -340,6 +340,7 @@ export class Sim {
       columnLength: 0,
       frontWidth: p.marchFrontWidthMaxM,
       density: p.marchDensity,
+      entryStart: 0,
       profile: null,
       speedMps: 0,
       speedCause: 'à l’arrêt',
@@ -453,6 +454,11 @@ export class Sim {
     g.sCentre = (head + tail) / 2;
     g.columnLength = Math.max(1, head - tail);
     g.frontWidth = prof.frontAt(head);
+    // colonne arrivant par une porte : les individus encore au-delà de la porte (aucune rue connue) restent hors de la zone, invisibles
+    if (g.entry === 'gateway') {
+      const inside = rho * (prof.area(head) - prof.area(-this.params.entryBufferM));
+      g.entryStart = Math.max(0, Math.min(n, Math.ceil(n - 0.5 - inside)));
+    } else g.entryStart = 0;
   }
 
   private planMarch(g: CrowdGroup, origin: Vec2, cause: Cause): void {

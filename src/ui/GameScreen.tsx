@@ -96,7 +96,8 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
   orderModeRef.current = orderMode;
   ctrlRef.current = ctrl;
 
-  const provider: MapProviderId = debug.providerOverride ?? settings.provider;
+  const [aerial, setAerial] = useState(false);
+  const provider: MapProviderId = debug.providerOverride ?? (aerial ? 'ign-aerial' : settings.provider);
   const origin: LngLat = live?.origin ?? city.center;
   const frame = useMemo(() => new LocalFrame(origin), [origin.lng, origin.lat]);
   const frameRef = useRef(frame);
@@ -210,7 +211,10 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapKind, provider, settings.customStyleUrl]);
 
-  useEffect(() => adapterRef.current?.setTactical(tactical), [tactical, mapKind]);
+  useEffect(() => adapterRef.current?.setTactical(tactical && !aerial), [tactical, aerial, mapKind]);
+  useEffect(() => {
+    if (rendererRef.current) rendererRef.current.aerial = aerial && mapKind === 'osm';
+  }, [aerial, mapKind]);
 
   // ---- couche de rendu : l'horloge de jeu est avancée par la boucle d'affichage
   useEffect(() => {
@@ -539,7 +543,7 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
       <aside class="side left">{ctrl && <ForcesPanel ctrl={ctrl} onSelect={select} />}</aside>
 
       <section class={`map-area ${orderMode ? 'order-mode' : ''}`} ref={wrapRef} aria-label="Carte de la zone de jeu">
-        <div class={`map-host ${tactical ? 'tactical' : ''}`} ref={hostRef} data-testid="map-host" />
+        <div class={`map-host ${tactical && !aerial ? 'tactical' : ''}`} ref={hostRef} data-testid="map-host" />
         <canvas class="game-layer" ref={canvasRef} data-testid="game-layer" aria-hidden="true" />
 
         {liveStatus.state === 'loading' && !ctrl && (
@@ -618,6 +622,11 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
           <button type="button" data-testid="switch-map" onClick={switchMap} title="Basculer entre la carte OSM et le fond schématique (la simulation redémarre)">
             Fond : {mapLabel}
           </button>
+          {mapKind === 'osm' && (
+            <button type="button" data-testid="toggle-aerial" aria-pressed={aerial} onClick={() => setAerial((v) => !v)} title="Basculer entre le plan et la vue aérienne (IGN, France)">
+              {aerial ? 'Vue : aérienne (IGN)' : 'Vue : plan'}
+            </button>
+          )}
           <label class="check small">
             <input type="checkbox" checked={tactical} disabled={mapKind === 'schematic'} onChange={(e) => setTactical((e.target as HTMLInputElement).checked)} />
             Vue tactique

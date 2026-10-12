@@ -28,3 +28,14 @@ describe('réglages', () => {
     expect(loadSettings(broken)).toEqual(DEFAULT_SETTINGS);
   });
 });
+
+import { buildStyle } from '../../src/map/MapLibreAdapter';
+describe('vue aérienne IGN', () => {
+  it('style raster de la Géoplateforme, attribution IGN, sans clé API', () => {
+    const st = buildStyle('ign-aerial', undefined, { lng: 6.17, lat: 49.11 }) as unknown as { sources: { base: { tiles: string[]; attribution: string } } };
+    expect(st.sources.base.tiles[0]).toContain('https://data.geopf.fr/wmts');
+    expect(st.sources.base.tiles[0]).toContain('ORTHOIMAGERY.ORTHOPHOTOS');
+    expect(st.sources.base.attribution).toContain('IGN');
+    expect(JSON.stringify(st)).not.toMatch(/key=|apikey|token/i);
+  });
+});

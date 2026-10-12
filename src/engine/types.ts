@@ -158,6 +158,8 @@ export interface CrowdGroup {
   frontWidth: number;
   /** Densité courante de la colonne (personnes/m²) : monte quand elle est bloquée, redescend quand elle repart. */
   density: number;
+  /** Premier individu déjà entré dans la zone (colonne arrivant par une porte) : les précédents attendent hors de la zone, invisibles. */
+  entryStart: number;
   /** Espace praticable le long de la route (largeur locale de chaque position de la colonne). */
   profile: ColumnProfile | null;
   speedMps: number;

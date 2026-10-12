@@ -3,6 +3,7 @@ import { RouteCursor, locate, type CursorOut, type Located, type Route } from '.
 import type { EdgeState } from '../nav/streetState';
 import type { WalkMask } from '../nav/walkMask';
 import { profileFor, profileOfRoute } from './column';
+import { snapToWalkable } from './layout';
 import type { SimParams } from './params';
 import { noise } from './rng';
 import type { CrowdGroup } from './types';
@@ -89,9 +90,39 @@ function marchTargets(g: CrowdGroup, c: MotionCtx, from: number, to: number): vo
     }
     cursor.at(s, cur);
     const off = prof.lateral(Math.max(0, Math.min(len, s)), m.lat[i] as number);
-    m.tx[i] = cur.x + cur.nx * off;
-    m.ty[i] = cur.y + cur.ny * off;
+    const px = cur.x + cur.nx * off;
+    const py = cur.y + cur.ny * off;
+    if (!c.mask || !c.mask.isBlocked(px, py)) {
+      m.tx[i] = px;
+      m.ty[i] = py;
+    } else {
+      // la position visée tombe dans un bâtiment (coin de rue, donnée imparfaite) : on la ramène dans l'espace praticable
+      const f = freePoint(c.mask, cur.x, cur.y, px, py);
+      m.tx[i] = f.x;
+      m.ty[i] = f.y;
+    }
   }
+}
+
+/**
+ * Point praticable le plus proche de la cible `(tx,ty)` en reculant vers le point de l'axe `(ax,ay)` : on s'arrête juste avant le
+ * premier bâtiment rencontré. Si l'axe lui-même est dans un bâtiment (données incohérentes), recherche en spirale.
+ */
+function freePoint(mask: WalkMask, ax: number, ay: number, tx: number, ty: number): { x: number; y: number } {
+  if (mask.isBlocked(ax, ay)) return snapToWalkable({ x: tx, y: ty }, mask);
+  const d = Math.hypot(tx - ax, ty - ay);
+  const steps = Math.max(1, Math.ceil(d / 0.5));
+  let lx = ax;
+  let ly = ay;
+  for (let k = 1; k <= steps; k++) {
+    const f = k / steps;
+    const x = ax + (tx - ax) * f;
+    const y = ay + (ty - ay) * f;
+    if (mask.isBlocked(x, y)) break;
+    lx = x;
+    ly = y;
+  }
+  return { x: lx, y: ly };
 }
 
 /** Abscisse (sur la route du groupe) de l'individu `i` d'une colonne en marche : sert au choix des niveaux par bloc. */
@@ -252,6 +283,12 @@ function dynamics(g: CrowdGroup, c: MotionCtx, i0: number, i1: number): void {
     const nx = cx + (dx / d) * step;
     const ny = cy + (dy / d) * step;
     if (mask && mask.isBlocked(nx, ny)) {
+      // un individu déjà DANS un bâtiment (placé là par une donnée imparfaite) en sort : il n'est jamais figé
+      if (mask.isBlocked(cx, cy)) {
+        x[i] = nx;
+        y[i] = ny;
+        continue;
+      }
       // glissement le long du bâtiment, sinon immobile : aucun individu n'entre dans un bâtiment
       if (!mask.isBlocked(nx, cy)) x[i] = nx;
       else if (!mask.isBlocked(cx, ny)) y[i] = ny;

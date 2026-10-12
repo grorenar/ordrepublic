@@ -6,12 +6,15 @@
  *  - Données OpenStreetMap : licence ODbL, attribution « © contributeurs OpenStreetMap » visible.
  *  - tile.openstreetmap.org : serveur communautaire, usage intensif / pré-chargement interdit sans
  *    autorisation, Referer valide et attribution obligatoires. NON utilisé par défaut.
+
+ *  - IGN Géoplateforme (vue aérienne) : orthophotographies en accès libre sans clé (Licence Ouverte Etalab 2.0), attribution « © IGN »
+ *    obligatoire, couverture France ; service public sans garantie de disponibilité.
  *  - OpenFreeMap : instance publique gratuite, sans clé, attribution « © OpenMapTiles, données ©
  *    OpenStreetMap » (ajoutée automatiquement par le style). Aucun SLA contractuel.
  *  - Nominatim public : 1 requête/s maximum pour l'ensemble de l'application, Referer ou User-Agent
  *    identifiant l'application, pas de requêtes périodiques ; mise en cache recommandée.
  */
-export type MapProviderId = 'openfreemap' | 'osm-raster' | 'custom-style' | 'test-local';
+export type MapProviderId = 'openfreemap' | 'osm-raster' | 'ign-aerial' | 'custom-style' | 'test-local';
 
 export interface MapProviderConfig {
   id: MapProviderId;
@@ -40,6 +43,16 @@ export const MAP_PROVIDERS: Record<MapProviderId, MapProviderConfig> = {
       "Serveur communautaire de la fondation OSM : à n'utiliser que pour des tests ponctuels (politique d'usage stricte).",
     rasterTiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
     attribution: '© <a href="https://www.openstreetmap.org/copyright">contributeurs OpenStreetMap</a>',
+    maxZoom: 19,
+  },
+  'ign-aerial': {
+    id: 'ign-aerial',
+    label: 'Vue aérienne (IGN, France)',
+    description: 'Orthophotographies de l’IGN (Géoplateforme), sans clé API, Licence Ouverte Etalab. Couverture : France uniquement.',
+    rasterTiles: [
+      'https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/jpeg',
+    ],
+    attribution: '© <a href="https://geoservices.ign.fr/">IGN</a> — Géoplateforme (Licence Ouverte Etalab 2.0)',
     maxZoom: 19,
   },
   'custom-style': {

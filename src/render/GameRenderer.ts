@@ -94,6 +94,8 @@ export class GameRenderer {
   /** Diagnostic : couches à ne pas dessiner (zone, streets, crowd, vehicles, units, routes). */
   readonly skip = new Set<string>();
   hover: EntityRef | null = null;
+  /** Fond aérien : les individus sont cerclés d'un liseré sombre pour rester lisibles sur la photo. */
+  aerial = false;
   /** Mode « Aller ici » actif : curseur de ciblage dessiné par l'interface. */
   readonly reducedMotion: boolean;
   motion = 1;
@@ -505,11 +507,15 @@ export class GameRenderer {
       const stride = Math.max(1, Math.ceil(total / DOT_BUDGET));
       ctx.save();
       ctx.fillStyle = tone;
+      if (this.aerial) {
+        ctx.strokeStyle = 'rgba(8,12,20,0.75)';
+        ctx.lineWidth = 1.2;
+      }
       ctx.beginPath();
       const W = this.cssW + 8;
       const H = this.cssH + 8;
       let drawn = 0;
-      const first = m.activeStart + ((g.seed >>> 0) % stride);
+      const first = Math.max(m.activeStart, g.entryStart) + ((g.seed >>> 0) % stride);
       const bl = g.blocks;
       for (let i = first; i < m.n; i += stride) {
         if (bl ? (bl.level[Math.floor(i / bl.size)] as number) === 0 : g.level === 0) continue;
@@ -522,6 +528,7 @@ export class GameRenderer {
         ctx.arc(sx, sy, dotR, 0, Math.PI * 2);
         drawn++;
       }
+      if (this.aerial) ctx.stroke();
       ctx.fill();
       ctx.restore();
       this.lastDots += drawn;

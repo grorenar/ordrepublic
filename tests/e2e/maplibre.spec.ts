@@ -218,6 +218,35 @@ test.describe('fournisseur OpenStreetMap par défaut', () => {
     await expect(page.getByTestId('play-here')).toBeEnabled();
   });
 
+  test('vue aérienne : bascule plan ↔ IGN en gardant la vue et la simulation, attribution IGN visible', async ({ page }) => {
+    await mockStyle(page);
+    const tileHits: string[] = [];
+    // tuile JPEG minimale (1×1) pour le service IGN simulé
+    const px = Buffer.from('/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=', 'base64');
+    await page.route('https://data.geopf.fr/**', (route) => {
+      tileHits.push(route.request().url());
+      return route.fulfill({ status: 200, contentType: 'image/jpeg', headers: { 'access-control-allow-origin': '*' }, body: px });
+    });
+    await page.route('https://overpass-api.de/api/interpreter', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(overpassGrid(METZ)) }),
+    );
+    await page.goto('/?debug&autostart=metz');
+    await expect(page.getByTestId('game')).toHaveAttribute('data-engine', 'preview', { timeout: 20_000 });
+    await page.getByTestId('play-here').click();
+    await expect(page.getByTestId('game')).toHaveAttribute('data-engine', 'ready', { timeout: 30_000 });
+    const v0 = await view(page);
+    await page.getByTestId('toggle-aerial').click();
+    await expect(page.getByTestId('toggle-aerial')).toHaveText(/aérienne/);
+    await expect(page.locator('.maplibregl-ctrl-attrib')).toContainText('IGN', { timeout: 15_000 });
+    await expect.poll(() => tileHits.length, { timeout: 15_000 }).toBeGreaterThan(0);
+    expect(tileHits[0]).toContain('ORTHOIMAGERY.ORTHOPHOTOS');
+    const v1 = await view(page);
+    expect(Math.abs(v1.lng - v0.lng)).toBeLessThan(1e-6); // la vue est conservée
+    expect(await page.evaluate(() => (window as any).__ORDRE__.ctrl !== null)).toBe(true); // la simulation continue
+    await page.getByTestId('toggle-aerial').click();
+    await expect(page.getByTestId('toggle-aerial')).toHaveText(/plan/);
+  });
+
   test('« Jouer ici » : service surchargé (429) → message explicite, la carte et le choix de secteur restent disponibles', async ({ page }) => {
     await mockStyle(page);
     await page.route(OVERPASS, (route) => route.fulfill({ status: 429, body: 'trop de requêtes' }));

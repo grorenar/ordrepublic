@@ -22,6 +22,8 @@ export class ColumnProfile {
   private readonly half: Float32Array;
   private readonly limit: Float32Array;
   private readonly front: Float64Array;
+  /** Poids (largeur × densité relative) : une foule qui s'étale en largeur se relâche (moins de monde par m²) sans changer de longueur. */
+  private readonly wgt: Float64Array;
   private readonly cum: Float64Array;
   private cap = -1;
 
@@ -29,7 +31,7 @@ export class ColumnProfile {
     readonly route: Route,
     graph: StreetGraph,
     state: Pick<EdgeState, 'walkLeft' | 'walkRight'>,
-    private readonly p: Pick<SimParams, 'marchFrontWidthMaxM' | 'openSpaceWidthM' | 'openSpaceFrontMaxM' | 'streetMarginM'>,
+    private readonly p: Pick<SimParams, 'marchFrontWidthMaxM' | 'openSpaceWidthM' | 'openSpaceFrontMaxM' | 'streetMarginM' | 'marchDensity' | 'marchDensityMin'>,
   ) {
     this.nodes = Math.max(2, Math.ceil(route.length / STEP_M) + 1);
     const K = this.nodes;
@@ -37,6 +39,7 @@ export class ColumnProfile {
     this.half = new Float32Array(K);
     this.limit = new Float32Array(K);
     this.front = new Float64Array(K);
+    this.wgt = new Float64Array(K);
     this.cum = new Float64Array(K);
     // corridor de chaque arête de la route, dans l'orientation de la marche
     const ne = route.edges.length;
@@ -87,8 +90,12 @@ export class ColumnProfile {
     this.cap = cap;
     let acc = 0;
     for (let k = 0; k < this.nodes; k++) {
-      this.front[k] = Math.min(cap, this.limit[k] as number);
-      if (k > 0) acc += (((this.front[k - 1] as number) + (this.front[k] as number)) / 2) * STEP_M;
+      const f = Math.min(cap, this.limit[k] as number);
+      this.front[k] = f;
+      // au-delà de la largeur de front des rues, la densité diminue en proportion (le nombre de personnes par mètre de route reste voisin)
+      const rel = Math.max(this.p.marchDensityMin / this.p.marchDensity, Math.min(1, this.p.marchFrontWidthMaxM / f));
+      this.wgt[k] = f * rel;
+      if (k > 0) acc += (((this.wgt[k - 1] as number) + (this.wgt[k] as number)) / 2) * STEP_M;
       this.cum[k] = acc;
     }
   }
@@ -109,21 +116,21 @@ export class ColumnProfile {
 
   /** Aire cumulée de la colonne depuis le début de la route (négative avant le début, prolongée linéairement après la fin). */
   area(s: number): number {
-    if (s <= 0) return (this.front[0] as number) * s;
+    if (s <= 0) return (this.wgt[0] as number) * s;
     const D = (this.nodes - 1) * STEP_M;
-    if (s >= D) return (this.cum[this.nodes - 1] as number) + (this.front[this.nodes - 1] as number) * (s - D);
+    if (s >= D) return (this.cum[this.nodes - 1] as number) + (this.wgt[this.nodes - 1] as number) * (s - D);
     const { k, t } = this.idx(s);
-    const f0 = this.front[k] as number;
-    const d = (this.front[k + 1] as number) - f0;
+    const f0 = this.wgt[k] as number;
+    const d = (this.wgt[k + 1] as number) - f0;
     return (this.cum[k] as number) + f0 * t + (d * t * t) / (2 * STEP_M);
   }
 
   /** Abscisse dont l'aire cumulée vaut `a` (réciproque de `area`). */
   inverse(a: number): number {
-    if (a <= 0) return a / (this.front[0] as number);
+    if (a <= 0) return a / (this.wgt[0] as number);
     const K = this.nodes - 1;
     const D = K * STEP_M;
-    if (a >= (this.cum[K] as number)) return D + (a - (this.cum[K] as number)) / (this.front[K] as number);
+    if (a >= (this.cum[K] as number)) return D + (a - (this.cum[K] as number)) / (this.wgt[K] as number);
     let lo = 0;
     let hi = K;
     while (hi - lo > 1) {
@@ -131,8 +138,8 @@ export class ColumnProfile {
       if ((this.cum[mid] as number) <= a) lo = mid;
       else hi = mid;
     }
-    const f0 = this.front[lo] as number;
-    const d = (this.front[lo + 1] as number) - f0;
+    const f0 = this.wgt[lo] as number;
+    const d = (this.wgt[lo + 1] as number) - f0;
     const r = a - (this.cum[lo] as number);
     const t = (2 * r) / (f0 + Math.sqrt(f0 * f0 + (2 * d * r) / STEP_M));
     return lo * STEP_M + t;
@@ -158,7 +165,7 @@ export class ColumnProfile {
     const need = n / rho;
     // aire(centre + L/2) − aire(centre − L/2) = need : fonction croissante de L, recherche dichotomique
     let lo = 0;
-    let hi = need / 0.8 + 10;
+    let hi = need / 0.3 + 10;
     for (let it = 0; it < 48; it++) {
       const mid = (lo + hi) / 2;
       if (this.area(centre + mid / 2) - this.area(centre - mid / 2) < need) lo = mid;

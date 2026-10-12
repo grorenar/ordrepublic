@@ -17,9 +17,9 @@ Contrôles de cohérence appliqués à la création d’un `Sim` (`validateSimPa
 | `speedByKind.march` | m/s | 1.1 | Vitesse de base d’un cortège en rue libre. | Multipliée par les facteurs de largeur de rue, de cohésion et de foules rencontrées. 1,1 m/s ≈ marche de cortège. |
 | `speedByKind.secondary` | m/s | 1.2 | Vitesse de base d’un groupe secondaire détaché. | Même rôle que `speedByKind.march`, pour les petits groupes qui se déplacent indépendamment. |
 | `speedByKind.dispersing` | m/s | 1.2 | Vitesse de marche des personnes qui quittent un rassemblement. | Détermine la durée pendant laquelle un rassemblement se vide (avec la durée de dispersion du scénario). |
-| `referenceStreetWidthM` | m | 10 | Largeur de rue au-delà de laquelle la largeur ne ralentit plus un cortège. | Facteur de vitesse = largeur du front / cette valeur (plafonné à 1). |
-| `narrowStreetMinFactor` | sans unité (0–1) | 0.6 | Facteur de vitesse plancher dû à l’étroitesse de la rue. | Empêche un cortège de s’arrêter simplement parce que la rue est étroite. |
-| `speedFactorByClass.*` | multiple | 0: 1.1 · 1: 1.05 · 2: 1 · 3: 0.95 · 4: 0.95 · 5: 0.9 · 6: 0.8 · 7: 1 · 8: 0.85 · 9: 0.75 · 10: 0.5 · 11: 0.7 | Facteur de vitesse d’un cortège selon la classe de la voie (0 grand axe … 10 escaliers, 11 piste). | Un cortège accélère sur un boulevard (×1,1) et ralentit en ruelle (×0,8), sentier (×0,75), escaliers (×0,5). Moyenne des facteurs sous le centre et la tête de la colonne. |
+| `referenceStreetWidthM` | m | 5 | Largeur de rue au-delà de laquelle la largeur ne ralentit plus un cortège. | Facteur de vitesse = largeur du front / cette valeur (plafonné à 1). |
+| `narrowStreetMinFactor` | sans unité (0–1) | 0.8 | Facteur de vitesse plancher dû à l’étroitesse de la rue. | Empêche un cortège de s’arrêter simplement parce que la rue est étroite. |
+| `speedFactorByClass.*` | multiple | 0: 1.05 · 1: 1.03 · 2: 1 · 3: 0.98 · 4: 0.98 · 5: 0.95 · 6: 0.92 · 7: 1 · 8: 0.95 · 9: 0.85 · 10: 0.6 · 11: 0.8 | Facteur de vitesse d’un cortège selon la classe de la voie (0 grand axe … 10 escaliers, 11 piste). | Nuances modérées : un peu plus vite sur un grand axe (×1,05), un peu moins en voie de service (×0,92), sentier (×0,85), escaliers (×0,6). Moyenne des facteurs sous le centre et la tête de la colonne. |
 | `crowdAccelMps2` | m/s² | 0.35 | Accélération maximale d’un cortège (le freinage est deux fois plus fort). | Lisse les changements de vitesse (type de rue, foule devant) : pas de saut de vitesse. |
 
 ## Densités et géométrie
@@ -28,6 +28,7 @@ Contrôles de cohérence appliqués à la création d’un `Sim` (`validateSimPa
 |---|---|---|---|---|
 | `marchDensity` | personnes/m² | 2 | Densité d’un cortège en marche. | Longueur de colonne = effectif / (densité × largeur du front). Doit rester < `nav.jamDensity` (validé). |
 | `staticDensity` | personnes/m² | 2 | Densité d’un rassemblement installé. | Aire occupée = effectif / densité (rayon de la zone praticable). Détermine aussi la largeur de rue occupée donc le blocage. Doit rester < `nav.jamDensity` (validé). |
+| `marchDensityMin` | personnes/m² | 0.8 | Densité minimale d’un cortège qui s’étale dans un espace large. | Au-delà de la largeur de front des rues, le front s’élargit et la densité diminue (jusqu’à ce plancher) : les gens se séparent les uns des autres sans ralentir ni allonger la colonne. |
 | `marchFrontWidthMaxM` | m | 14 | Largeur maximale du front d’un cortège. | Un cortège plus large que la rue se réduit à la largeur disponible (moins marges) ; au-delà de cette valeur il s’allonge. |
 | `marchFrontWidthMinM` | m | 2 | Largeur minimale du front : un petit groupe forme un bloc compact. | Largeur du front = √(effectif / densité), bornée par ce minimum et le maximum. |
 | `arrivalZoneM` | m | 40 | Rayon autour d’une destination où un groupe (ou une unité à pied) peut traverser une foule dense pour la rejoindre. | Évite qu’un rassemblement existant ferme l’accès à sa propre place. Les véhicules ne traversent jamais une foule. |
@@ -39,6 +40,7 @@ Contrôles de cohérence appliqués à la création d’un `Sim` (`validateSimPa
 | `densityRatePerS` | personnes/m² par s | 0.05 | Vitesse maximale de variation de la densité d’un cortège qui se tasse (bloqué) ou se relâche. | Durée du tassement : (waitDensity − marchDensity) / densityRatePerS. |
 | `walkWidthSampleEveryM` | m | 10 | Intervalle entre points de mesure de la largeur praticable le long d’une rue. | Plus petit : mesure plus fine, calcul initial plus long. |
 | `sidewalkAllowanceM` | m | 2.5 | Trottoir supposé de chaque côté d’une rue ouverte aux véhicules quand aucun bâtiment ne permet de mesurer. | Largeur praticable = chaussée + 2 × trottoir. Sans effet quand les bâtiments sont connus (largeur mesurée façade à façade). |
+| `entryBufferM` | m | 10 | Distance derrière une porte d’entrée au-delà de laquelle un individu est hors de la zone (aucune rue connue). | Les individus d’une colonne qui arrive par une porte sont invisibles tant qu’ils n’ont pas franchi la porte : pas de foule posée à travers les immeubles à l’apparition. |
 | `streetMarginM` | m | 0.8 | Marge entre un cortège et le bord de la rue. | Réduit la largeur utile du front (2 marges retirées de la largeur de rue). |
 | `columnLengthRateMps` | m/s | 4 | Vitesse maximale de variation de la longueur de colonne. | Lisse l’allongement/raccourcissement quand la largeur de rue change : aucun saut de position. |
 | `staticMaxRadiusM` | m | 2500 | Rayon maximal exploré pour placer un rassemblement statique. | Au-delà, la densité effective augmente (journalisé) ; borne le coût de mise en place. |

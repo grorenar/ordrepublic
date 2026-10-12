@@ -20,6 +20,8 @@ export interface SimParams {
   // --- densités (personnes/m²) et géométrie ---------------------------------
   marchDensity: number;
   staticDensity: number;
+  /** Densité minimale (personnes/m²) d'un cortège qui s'étale dans un espace large : il se relâche au lieu de ralentir. */
+  marchDensityMin: number;
   /** Largeur maximale du front d'un cortège (m). */
   marchFrontWidthMaxM: number;
   /** Largeur minimale du front d'un cortège (m) : un petit groupe forme un bloc compact, pas un front de 14 m. */
@@ -46,6 +48,8 @@ export interface SimParams {
   walkWidthSampleEveryM: number;
   /** Trottoir supposé de chaque côté (m) d'une rue ouverte aux véhicules quand aucun bâtiment ne permet de mesurer. */
   sidewalkAllowanceM: number;
+  /** Distance (m) derrière une porte d'entrée à partir de laquelle un individu est considéré hors de la zone (invisible, il n'y a pas de rue connue). */
+  entryBufferM: number;
   /** Marge entre le cortège et le bord de la rue (m). */
   streetMarginM: number;
   /** Variation maximale de la longueur de colonne (m/s) : évite les sauts de position. */
@@ -125,14 +129,15 @@ export const DEFAULT_SIM_PARAMS: SimParams = {
     arrivalToleranceM: 2,
     formationSpacingM: 3,
   },
-  referenceStreetWidthM: 10,
-  narrowStreetMinFactor: 0.6,
+  referenceStreetWidthM: 5,
+  narrowStreetMinFactor: 0.8,
   marchDensity: 2,
   staticDensity: 2,
+  marchDensityMin: 0.8,
   marchFrontWidthMaxM: 14,
   marchFrontWidthMinM: 2,
   arrivalZoneM: 40,
-  speedFactorByClass: { 0: 1.1, 1: 1.05, 2: 1, 3: 0.95, 4: 0.95, 5: 0.9, 6: 0.8, 7: 1, 8: 0.85, 9: 0.75, 10: 0.5, 11: 0.7 },
+  speedFactorByClass: { 0: 1.05, 1: 1.03, 2: 1, 3: 0.98, 4: 0.98, 5: 0.95, 6: 0.92, 7: 1, 8: 0.95, 9: 0.85, 10: 0.6, 11: 0.8 },
   crowdAccelMps2: 0.35,
   waitDensity: 3,
   walkHalfWidthMaxM: 32,
@@ -142,6 +147,7 @@ export const DEFAULT_SIM_PARAMS: SimParams = {
   densityRatePerS: 0.05,
   walkWidthSampleEveryM: 10,
   sidewalkAllowanceM: 2.5,
+  entryBufferM: 10,
   streetMarginM: 0.8,
   columnLengthRateMps: 4,
   staticMaxRadiusM: 2500,

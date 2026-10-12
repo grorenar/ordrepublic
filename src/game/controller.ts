@@ -190,9 +190,10 @@ export class GameController {
       const g = this.sim.group(ref.id);
       if (!g) return null;
       const m = g.members;
-      const n = m.n - m.activeStart;
+      const lo = Math.max(m.activeStart, g.entryStart);
+      const n = m.n - lo;
       if (n <= 0) return null;
-      const i = m.activeStart + Math.floor(n / 2);
+      const i = lo + Math.floor(n / 2);
       return { x: m.x[i] as number, y: m.y[i] as number };
     }
     const e = this.sim.entity(ref.id);
