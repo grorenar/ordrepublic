@@ -39,3 +39,7 @@ Branche `claude/cahier-des-charges-phase1`. Périmètre : cahier §8.4 (incident
 - Aucune extinction (secours, phase 6) ; le confinement par une unité est une simplification de gameplay documentée.
 - Pas d'acteurs individuels « casseurs » (phase 5) : l'incident vient de la tension d'un groupe et de la proximité d'un objet.
 - Les effets de fumée/feu sont des primitives vectorielles provisoires (`EffectSpec` : phase 5).
+
+## Suite prévue (demandée, non commencée)
+
+Réaction de la foule à un incident : détachement d'une partie du cortège qui reste sur les lieux, puis, à l'arrivée des secours ou des forces, dispersion, fuite ou dégénérescence (jets abstraits). Exigence consignée au cahier §8.4 ; elle s'implémentera avec les comportements individuels (phase 5) et les secours (phase 6). Points d'accroche déjà en place : `splitGroup` (scission causale), `Incident.groupId`, `CrowdGroup.tension / cohesion / affectedUntilMs`, présence d'unités (`unitNear`), états d'incident.
