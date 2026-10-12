@@ -72,6 +72,8 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
   const [, setRev] = useState(0);
   const [banners, setBanners] = useState<Banner[]>([]);
   const [fatal, setFatal] = useState<string | null>(null);
+  /** Carte réelle affichée sans simulation (aucun paquet OSM cohérent pour la ville). */
+  const [preview, setPreview] = useState<string | null>(null);
 
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -98,12 +100,18 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
     let cancelled = false;
     setCtrl(null);
     setFatal(null);
+    setPreview(null);
     setBanners([]);
     setOrderMode(false);
     // fournisseur de test local (debug) : le fond n'est pas une carte réelle, on simule sur le graphe schématique
     const want: WorldKind = debug.providerOverride ? 'schematic' : mapKind;
     provideWorld(city, want).then((w) => {
       if (cancelled) return;
+      if (w.missingPack) {
+        // la carte réelle RESTE affichée ; aucune simulation n'est posée dessus
+        setPreview(w.notice ?? 'Simulation indisponible sur la carte réelle.');
+        return;
+      }
       if (w.kind !== want) {
         if (w.notice) setNotice({ level: 'warn', text: w.notice, source: 'world' });
         setMapKind(w.kind);
@@ -408,7 +416,7 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
   const loadingWorld = !ctrl;
 
   return (
-    <div class="game" data-testid="game" data-map-kind={adapterKind} data-map-state={mapStatus.state} data-engine={ctrl ? 'ready' : 'loading'}>
+    <div class="game" data-testid="game" data-map-kind={adapterKind} data-map-state={mapStatus.state} data-engine={ctrl ? 'ready' : preview ? 'preview' : 'loading'}>
       {ctrl ? (
         <TopBar
           ctrl={ctrl}
@@ -438,6 +446,13 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
                 Réessayer en fond schématique
               </button>
             </span>
+          ) : preview ? (
+            <span class="situation preview" data-testid="preview-banner" role="status">
+              <strong>Carte réelle — aperçu sans simulation.</strong> {preview}{' '}
+              <button type="button" class="primary" data-testid="start-schematic" onClick={() => { setNotice(null); setMapKind('schematic'); }}>
+                Lancer la simulation (fond schématique)
+              </button>
+            </span>
           ) : (
             <span class="muted">Préparation de la simulation…</span>
           )}
@@ -462,7 +477,7 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
           ))}
         </div>
 
-        {(notice || mapStatus.state === 'loading' || (loadingWorld && !fatal)) && (
+        {(notice || mapStatus.state === 'loading' || (loadingWorld && !fatal && !preview)) && (
           <div class={`map-notice map-ui ${notice?.level ?? 'info'}`} role="status" data-testid="map-notice">
             <span>{notice ? notice.text : loadingWorld ? 'Préparation de la simulation…' : 'Chargement de la carte…'}</span>
             {notice && mapKind === 'schematic' && (

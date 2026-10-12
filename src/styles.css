@@ -140,3 +140,4 @@ details.why ol { padding-left: 16px; margin: 4px 0; } details.why li { margin-bo
 .map-area.order-mode .maplibregl-canvas, .map-area.order-mode .schematic-canvas { cursor: crosshair !important; }
 .map-bottom { max-width: calc(100% - 24px); }
 .legend { background: rgba(8,12,20,.85); padding: 4px 8px; border-radius: 6px; color: #cbd5e1; }
+.situation.preview { text-transform: none; letter-spacing: 0; font-weight: 500; flex-wrap: wrap; background: #3b2a06; border-color: #f59e0b; max-width: 72vw; }

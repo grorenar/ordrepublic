@@ -118,12 +118,41 @@ test.describe('fournisseur OpenStreetMap par défaut', () => {
     await expect(page.locator('.maplibregl-ctrl-attrib')).toContainText('OpenStreetMap');
   });
 
-  test('sans paquet OSM préparé : le fond schématique est utilisé et le message l’explique', async ({ page }) => {
-    await page.route(STYLE, (route) => route.abort('failed'));
+  const okStyle = {
+    version: 8,
+    sources: { s: { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, attribution: '© OpenMapTiles Données © contributeurs OpenStreetMap' } },
+    layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#223' } }, { id: 'l', type: 'line', source: 's', paint: { 'line-color': '#fff' } }],
+  };
+
+  test('sans paquet OSM : la carte réelle reste affichée (aperçu), aucune simulation superposée, lancement explicite du schématique', async ({ page }) => {
+    await page.route(STYLE, (route) => route.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(okStyle) }));
     await page.goto('/?debug&autostart=metz');
-    await expect(page.getByTestId('game')).toHaveAttribute('data-map-kind', 'schematic', { timeout: 20_000 });
+    await expect(page.getByTestId('game')).toHaveAttribute('data-engine', 'preview', { timeout: 20_000 });
+    await expect(page.getByTestId('game')).toHaveAttribute('data-map-kind', 'maplibre');
+    await expect(page.getByTestId('game')).toHaveAttribute('data-map-state', 'ready');
+    await expect(page.locator('.maplibregl-canvas')).toBeVisible();
+    await expect(page.locator('.maplibregl-ctrl-attrib')).toContainText('OpenStreetMap');
+    await expect(page.getByTestId('preview-banner')).toContainText('aperçu sans simulation');
+    // aucun pion, aucun moteur sur la vraie carte
+    expect(await page.evaluate(() => (window as any).__ORDRE__.ctrl)).toBeNull();
+    expect((await targets(page)).length).toBe(0);
+    // la carte reste utilisable : zoom et déplacement
+    const v0 = await view(page);
+    await page.getByTestId('zoom-in').click();
+    await page.waitForTimeout(700);
+    const v1 = await view(page);
+    expect(v1.zoom).toBeGreaterThan(v0.zoom + 0.5);
+    const box = await mapBox(page);
+    await page.mouse.move(box.x + 400, box.y + 300);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 300, box.y + 360, { steps: 6 });
+    await page.mouse.up();
+    await page.waitForTimeout(500);
+    expect((await view(page)).lng).toBeGreaterThan(v1.lng);
+    // lancement explicite de la simulation : fond schématique cohérent avec le graphe
+    await page.getByTestId('start-schematic').click();
+    await expect(page.getByTestId('game')).toHaveAttribute('data-map-kind', 'schematic');
     await expect(page.getByTestId('game')).toHaveAttribute('data-engine', 'ready', { timeout: 20_000 });
-    await expect(page.getByTestId('map-notice')).toContainText('schématique');
   });
 
   test('service de carte injoignable : message clair puis bascule automatique en mode schématique', async ({ page }) => {

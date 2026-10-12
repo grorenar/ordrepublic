@@ -136,7 +136,8 @@ export class MapLibreAdapter implements MapAdapter {
         const ev = e as { error?: Error };
         if (!this.styleLoaded) {
           // erreur de style (JSON introuvable, invalide, refusé…) : la carte est inutilisable
-          fail(`Chargement de la carte impossible (${String(ev.error?.message ?? 'erreur inconnue')}).`);
+          const host = typeof style === 'string' ? new URL(style, location.href).host : 'style local';
+          fail(`Chargement de la carte impossible depuis ${host} (${String(ev.error?.message ?? 'erreur inconnue')}). Causes possibles : service indisponible, réseau, bloqueur de contenu.`);
           return;
         }
         this.tileErrors++;

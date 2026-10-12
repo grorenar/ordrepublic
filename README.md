@@ -48,8 +48,8 @@ Ne pas forcer `--use-angle=swiftshader` : en environnement sans GPU cela ralenti
 
 Paramètres d'URL de diagnostic : `?debug` (expose `window.__ORDRE__`), `&autostart=metz|paris|lyon|marseille`,
 `&map=schematic|osm|test` (`test` = style MapLibre local sans réseau ; la simulation tourne alors sur le graphe schématique).
-Sans paquet OSM préparé pour la ville (`public/data/osm/<ville>.graph.json`), le fond OSM n'est pas utilisé : le jeu bascule sur le fond
-schématique en le signalant (le graphe simulé doit correspondre à la carte affichée). Voir `docs/DONNEES_OSM.md`.
+Sans paquet OSM préparé pour la ville (`public/data/osm/<ville>.graph.json`), la **carte réelle s'affiche en aperçu, sans simulation** (le graphe
+simulé doit correspondre aux rues affichées) ; le bouton « Lancer la simulation » bascule sur le fond schématique. Voir `docs/DONNEES_OSM.md`.
 
 ## Arborescence
 

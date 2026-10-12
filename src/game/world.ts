@@ -12,13 +12,18 @@ export interface World {
   graph: StreetGraph;
   /** Message à afficher au joueur quand le fond demandé n'a pas pu être honoré. */
   notice?: string;
+  /**
+   * Vrai quand le fond OSM était demandé mais qu'aucun graphe cohérent n'est disponible (paquet absent ou invalide) :
+   * l'interface affiche alors la carte réelle SANS simulation (aperçu), jamais un moteur posé sur des rues qui ne correspondent pas.
+   */
+  missingPack?: boolean;
 }
 
 /**
  * Fournit le graphe de rues cohérent avec le fond affiché.
  *  - fond schématique → graphe schématique (mêmes rues, places et bâtiments que le dessin) ;
- *  - fond OSM → paquet préparé de la ville (public/data/osm/<ville>.graph.json) ; s'il n'existe pas, le graphe
- *    ne correspondrait pas à la carte : on retombe sur le fond schématique en le disant clairement.
+ *  - fond OSM → paquet préparé de la ville (public/data/osm/<ville>.graph.json) ; s'il n'existe pas, `missingPack` est vrai :
+ *    la carte réelle reste affichée en aperçu, sans simulation (le graphe schématique renvoyé ne doit PAS être utilisé avec elle).
  */
 export async function provideWorld(city: City, want: WorldKind, fetchFn?: typeof fetch): Promise<World> {
   if (want === 'osm') {
@@ -27,12 +32,13 @@ export async function provideWorld(city: City, want: WorldKind, fetchFn?: typeof
       if (pack) return { kind: 'osm', graph: pack.graph };
     } catch (err) {
       const why = err instanceof PackError ? err.message : 'lecture impossible';
-      return schematic(city, `Paquet OSM invalide (${why}) : fond schématique utilisé. Voir docs/DONNEES_OSM.md.`);
+      return { ...schematic(city), missingPack: true, notice: `Paquet OSM invalide (${why}). Voir docs/DONNEES_OSM.md.` };
     }
-    return schematic(
-      city,
-      `Aucun paquet OSM préparé pour ${city.name} : les rues simulées ne correspondraient pas à la carte. Fond schématique utilisé (voir docs/DONNEES_OSM.md pour générer le paquet).`,
-    );
+    return {
+      ...schematic(city),
+      missingPack: true,
+      notice: `Aucun paquet OSM préparé pour ${city.name} : la simulation n'est pas disponible sur la carte réelle (ses rues ne correspondraient pas au graphe de navigation). Voir docs/DONNEES_OSM.md.`,
+    };
   }
   return schematic(city);
 }
