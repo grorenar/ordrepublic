@@ -78,7 +78,9 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
   const [preview, setPreview] = useState<string | null>(null);
   /** Graphe OSM chargé à la demande pour le secteur choisi (origine = centre de la carte au moment du choix). */
   const [live, setLive] = useState<{ origin: LngLat; graph: StreetGraph } | null>(null);
-  const [liveStatus, setLiveStatus] = useState<{ state: 'idle' | 'loading' | 'error'; text: string }>({ state: 'idle', text: '' });
+  const [liveStatus, setLiveStatus] = useState<{ state: 'idle' | 'loading' | 'error'; text: string; step: number }>({ state: 'idle', text: '', step: 0 });
+  const [loadSecs, setLoadSecs] = useState(0);
+  const abortRef = useRef<AbortController | null>(null);
 
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -108,7 +110,7 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
     setFatal(null);
     setPreview(null);
     setLive(null);
-    setLiveStatus({ state: 'idle', text: '' });
+    setLiveStatus({ state: 'idle', text: '', step: 0 });
     setBanners([]);
     setOrderMode(false);
     // fournisseur de test local (debug) : le fond n'est pas une carte réelle, on simule sur le graphe schématique
@@ -139,12 +141,21 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [city, mapKind]);
 
+  // temps écoulé affiché pendant le chargement
+  useEffect(() => {
+    if (liveStatus.state !== 'loading') return;
+    const t0 = Date.now();
+    const id = window.setInterval(() => setLoadSecs(Math.floor((Date.now() - t0) / 1000)), 500);
+    return () => window.clearInterval(id);
+  }, [liveStatus.state]);
+
   // ---- moteur sur le graphe OSM chargé à la demande
   useEffect(() => {
     if (!live) return;
     try {
       setCtrl(new GameController({ graph: live.graph, zoneLevel }));
       setPreview(null);
+      setLiveStatus({ state: 'idle', text: '', step: 0 });
     } catch (err) {
       setFatal(`Initialisation du moteur impossible : ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -437,17 +448,29 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
     if (!a || liveStatus.state === 'loading') return;
     const v = a.getView();
     const center = { lng: v.lng, lat: v.lat };
-    setLiveStatus({ state: 'loading', text: 'Préparation…' });
+    const ctl = new AbortController();
+    abortRef.current = ctl;
+    setLoadSecs(0);
+    setLiveStatus({ state: 'loading', text: 'Préparation de la requête…', step: 1 });
     try {
       const r = await loadZoneGraph(center, ZONE_LEVELS[zoneLevel] as (typeof ZONE_LEVELS)[number], city.name, {
         cache: indexedDbCache(),
-        onProgress: (text) => setLiveStatus({ state: 'loading', text }),
+        signal: ctl.signal,
+        onProgress: (text, step) => setLiveStatus({ state: 'loading', text, step }),
       });
-      setLiveStatus({ state: 'idle', text: '' });
+      // étape 3 : démarrage du moteur (l'écran de chargement reste affiché jusqu'à ce que la simulation soit prête)
+      setLiveStatus({ state: 'loading', text: 'Démarrage de la simulation…', step: 3 });
+      await new Promise((res) => setTimeout(res, 30));
       setLive({ origin: center, graph: r.graph });
     } catch (err) {
+      if (err instanceof LiveLoadError && err.kind === 'cancelled') {
+        setLiveStatus({ state: 'idle', text: '', step: 0 });
+        return;
+      }
       const text = err instanceof LiveLoadError ? err.message : `Chargement impossible : ${err instanceof Error ? err.message : String(err)}`;
-      setLiveStatus({ state: 'error', text });
+      setLiveStatus({ state: 'error', text, step: 0 });
+    } finally {
+      abortRef.current = null;
     }
   };
   const pickCity = (c: City) => {
@@ -499,7 +522,6 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
               <button type="button" data-testid="start-schematic" onClick={() => { setNotice(null); setMapKind('schematic'); }}>
                 Ou jouer sur la ville fictive (fond schématique)
               </button>
-              {liveStatus.state === 'loading' && <span data-testid="live-progress"> {liveStatus.text}</span>}
               {liveStatus.state === 'error' && (
                 <span class="warn" role="alert" data-testid="live-error"> {liveStatus.text}</span>
               )}
@@ -519,6 +541,29 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
       <section class={`map-area ${orderMode ? 'order-mode' : ''}`} ref={wrapRef} aria-label="Carte de la zone de jeu">
         <div class={`map-host ${tactical ? 'tactical' : ''}`} ref={hostRef} data-testid="map-host" />
         <canvas class="game-layer" ref={canvasRef} data-testid="game-layer" aria-hidden="true" />
+
+        {liveStatus.state === 'loading' && !ctrl && (
+          <div class="loading-overlay map-ui" role="status" aria-live="polite" data-testid="loading-overlay">
+            <div class="loading-card">
+              <div class="spinner" aria-hidden="true" />
+              <h2>Préparation du secteur de jeu</h2>
+              <ol class="steps">
+                {['Téléchargement des rues et bâtiments OpenStreetMap', 'Construction du graphe de navigation', 'Démarrage de la simulation'].map((label, i) => (
+                  <li key={label} class={liveStatus.step > i + 1 ? 'done' : liveStatus.step === i + 1 ? 'now' : ''}>
+                    <span aria-hidden="true">{liveStatus.step > i + 1 ? '✔' : liveStatus.step === i + 1 ? '⏳' : '○'}</span> {label}
+                  </li>
+                ))}
+              </ol>
+              <p class="muted small" data-testid="live-progress">
+                {liveStatus.text} · {loadSecs} s
+              </p>
+              {loadSecs >= 12 && liveStatus.step === 1 && <p class="small">Le service OpenStreetMap peut être lent selon la charge ; le délai maximal est de 60 s.</p>}
+              <button type="button" data-testid="load-cancel" onClick={() => abortRef.current?.abort()} disabled={liveStatus.step >= 2}>
+                Annuler
+              </button>
+            </div>
+          </div>
+        )}
 
         <div class="banners map-ui" aria-live="polite">
           {banners.map((b) => (

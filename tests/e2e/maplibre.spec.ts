@@ -185,6 +185,39 @@ test.describe('fournisseur OpenStreetMap par défaut', () => {
     expect(r2.maxErr).toBeLessThan(0.75);
   });
 
+  test('écran de chargement : étapes, temps écoulé, puis disparition quand la simulation est prête', async ({ page }) => {
+    await mockStyle(page);
+    await page.route(OVERPASS, async (route) => {
+      await new Promise((r) => setTimeout(r, 1500));
+      await route.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(overpassGrid(METZ)) });
+    });
+    await page.goto('/?debug&autostart=metz');
+    await expect(page.getByTestId('game')).toHaveAttribute('data-engine', 'preview', { timeout: 20_000 });
+    await page.getByTestId('play-here').click();
+    const ov = page.getByTestId('loading-overlay');
+    await expect(ov).toBeVisible();
+    await expect(ov).toContainText('Téléchargement des rues');
+    await expect(page.getByTestId('live-progress')).toContainText(' s');
+    await expect(page.getByTestId('game')).toHaveAttribute('data-engine', 'ready', { timeout: 30_000 });
+    await expect(ov).toHaveCount(0);
+  });
+
+  test('écran de chargement : « Annuler » interrompt le téléchargement sans erreur et rend la main', async ({ page }) => {
+    await mockStyle(page);
+    await page.route(OVERPASS, async (route) => {
+      await new Promise((r) => setTimeout(r, 8000));
+      await route.abort('failed').catch(() => undefined);
+    });
+    await page.goto('/?debug&autostart=metz');
+    await expect(page.getByTestId('game')).toHaveAttribute('data-engine', 'preview', { timeout: 20_000 });
+    await page.getByTestId('play-here').click();
+    await expect(page.getByTestId('loading-overlay')).toBeVisible();
+    await page.getByTestId('load-cancel').click();
+    await expect(page.getByTestId('loading-overlay')).toHaveCount(0);
+    await expect(page.getByTestId('live-error')).toHaveCount(0);
+    await expect(page.getByTestId('play-here')).toBeEnabled();
+  });
+
   test('« Jouer ici » : service surchargé (429) → message explicite, la carte et le choix de secteur restent disponibles', async ({ page }) => {
     await mockStyle(page);
     await page.route(OVERPASS, (route) => route.fulfill({ status: 429, body: 'trop de requêtes' }));

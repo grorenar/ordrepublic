@@ -141,3 +141,19 @@ details.why ol { padding-left: 16px; margin: 4px 0; } details.why li { margin-bo
 .map-bottom { max-width: calc(100% - 24px); }
 .legend { background: rgba(8,12,20,.85); padding: 4px 8px; border-radius: 6px; color: #cbd5e1; }
 .situation.preview { text-transform: none; letter-spacing: 0; font-weight: 500; flex-wrap: wrap; background: #3b2a06; border-color: #f59e0b; max-width: 72vw; }
+.loading-overlay { inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(4,10,20,.72); z-index: 20; }
+.loading-card { background: #0f1b2d; border: 1px solid #1e3a5f; border-radius: 10px; padding: 22px 28px; min-width: 340px; max-width: 480px; box-shadow: 0 12px 40px rgba(0,0,0,.5); }
+.loading-card h2 { margin: 10px 0 12px; font-size: 16px; }
+.loading-card .steps { list-style: none; margin: 0 0 10px; padding: 0; } .loading-card .steps li { padding: 3px 0; color: #94a3b8; }
+.loading-card .steps li.now { color: #f8fafc; font-weight: 600; } .loading-card .steps li.done { color: #6ee7b7; }
+.spinner { width: 30px; height: 30px; border-radius: 50%; border: 4px solid #1e3a5f; border-top-color: #22d3ee; animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 3s; } }
+.loading-overlay { inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(4,10,20,.72); z-index: 20; }
+.loading-card { background: #0f1b2d; border: 1px solid #1e3a5f; border-radius: 10px; padding: 22px 28px; min-width: 340px; max-width: 480px; box-shadow: 0 12px 40px rgba(0,0,0,.5); }
+.loading-card h2 { margin: 10px 0 12px; font-size: 16px; }
+.loading-card .steps { list-style: none; margin: 0 0 10px; padding: 0; } .loading-card .steps li { padding: 3px 0; color: #94a3b8; }
+.loading-card .steps li.now { color: #f8fafc; font-weight: 600; } .loading-card .steps li.done { color: #6ee7b7; }
+.spinner { width: 30px; height: 30px; border-radius: 50%; border: 4px solid #1e3a5f; border-top-color: #22d3ee; animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 3s; } }

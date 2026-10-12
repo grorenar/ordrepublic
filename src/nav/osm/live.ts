@@ -20,7 +20,7 @@ export const MIN_EDGES = 10;
 export class LiveLoadError extends Error {
   constructor(
     message: string,
-    readonly kind: 'overloaded' | 'network' | 'timeout' | 'empty' | 'invalid' | 'too_large',
+    readonly kind: 'overloaded' | 'network' | 'timeout' | 'empty' | 'invalid' | 'too_large' | 'cancelled',
   ) {
     super(message);
   }
@@ -36,7 +36,10 @@ export interface LiveOptions {
   endpoints?: string[];
   cache?: ZoneCache | null;
   timeoutMs?: number;
-  onProgress?: (text: string) => void;
+  /** Étape 1 = téléchargement, 2 = construction du graphe (3 = démarrage, géré par l'interface). */
+  onProgress?: (text: string, step: number) => void;
+  /** Permet au joueur d'annuler le chargement. */
+  signal?: AbortSignal;
 }
 
 export interface LiveResult {
@@ -51,12 +54,14 @@ export const zoneKey = (c: LngLat, hw: number, hh: number): string => `zone:${c.
 
 export async function loadZoneGraph(center: LngLat, half: { halfWidth: number; halfHeight: number }, name: string, o: LiveOptions = {}): Promise<LiveResult> {
   const progress = o.onProgress ?? (() => undefined);
+  const cancelled = () => new LiveLoadError('Chargement annulé.', 'cancelled');
+  if (o.signal?.aborted) throw cancelled();
   const key = zoneKey(center, half.halfWidth, half.halfHeight);
   if (o.cache) {
     try {
       const hit = await o.cache.get(key);
       if (hit) {
-        progress('Secteur déjà téléchargé : lecture du cache local…');
+        progress('Secteur déjà téléchargé : lecture du cache local…', 2);
         return { graph: unpackGraph(hit).graph, fromCache: true };
       }
     } catch {
@@ -75,9 +80,11 @@ export async function loadZoneGraph(center: LngLat, half: { halfWidth: number; h
   let used = '';
   let lastErr: LiveLoadError | null = null;
   for (const endpoint of o.endpoints ?? OVERPASS_ENDPOINTS) {
-    progress(`Téléchargement des rues et bâtiments OpenStreetMap (${new URL(endpoint).host})…`);
+    progress(`Téléchargement des rues et bâtiments OpenStreetMap (${new URL(endpoint).host})…`, 1);
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), o.timeoutMs ?? LIVE_TIMEOUT_MS);
+    const onAbort = () => ctl.abort();
+    o.signal?.addEventListener('abort', onAbort);
     try {
       const res = await fetchFn(endpoint, { method: 'POST', body: new URLSearchParams({ data: query }), signal: ctl.signal });
       if (res.status === 429 || res.status === 504) {
@@ -95,6 +102,8 @@ export async function loadZoneGraph(center: LngLat, half: { halfWidth: number; h
       if (e instanceof LiveLoadError) {
         if (e.kind === 'overloaded') throw e;
         lastErr = e;
+      } else if (o.signal?.aborted) {
+        throw cancelled();
       } else if (e instanceof DOMException && e.name === 'AbortError') {
         lastErr = new LiveLoadError('Délai dépassé : le service Overpass ne répond pas.', 'timeout');
       } else {
@@ -102,11 +111,13 @@ export async function loadZoneGraph(center: LngLat, half: { halfWidth: number; h
       }
     } finally {
       clearTimeout(timer);
+      o.signal?.removeEventListener('abort', onAbort);
     }
   }
   if (json === null) throw lastErr ?? new LiveLoadError('Aucun service Overpass disponible.', 'network');
 
-  progress('Construction du graphe de navigation…');
+  if (o.signal?.aborted) throw cancelled();
+  progress('Construction du graphe de navigation…', 2);
   let built;
   try {
     built = buildGraphFromOsm(parseOverpass(json), { origin: center, label: name });

@@ -61,6 +61,16 @@ describe('chargement à la demande du graphe OSM d’un secteur', () => {
     await expect(loadZoneGraph(metz, half, 'Metz', { fetchFn: bad, cache: null })).rejects.toMatchObject({ kind: 'invalid' });
   });
 
+  it('l’annulation par le joueur interrompt la requête (erreur « cancelled »)', async () => {
+    const ctl = new AbortController();
+    const slow = ((_u: RequestInfo | URL, init?: RequestInit) => new Promise((_res, rej) => init?.signal?.addEventListener('abort', () => rej(new DOMException('x', 'AbortError'))))) as typeof fetch;
+    const p = loadZoneGraph(metz, half, 'Metz', { fetchFn: slow, cache: null, signal: ctl.signal, endpoints: ['https://a.example/api'] });
+    setTimeout(() => ctl.abort(), 10);
+    await expect(p).rejects.toMatchObject({ kind: 'cancelled' });
+    ctl.abort();
+    await expect(loadZoneGraph(metz, half, 'Metz', { fetchFn: slow, cache: null, signal: ctl.signal })).rejects.toMatchObject({ kind: 'cancelled' });
+  });
+
   it('le délai dépassé est signalé', async () => {
     const slow = ((_u: RequestInfo | URL, init?: RequestInit) => new Promise((_res, rej) => init?.signal?.addEventListener('abort', () => rej(new DOMException('x', 'AbortError'))))) as typeof fetch;
     await expect(loadZoneGraph(metz, half, 'Metz', { fetchFn: slow, cache: null, timeoutMs: 20, endpoints: ['https://a.example/api'] })).rejects.toMatchObject({ kind: 'timeout' });
