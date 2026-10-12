@@ -8,8 +8,14 @@ import { openGame } from './helpers';
  * Les valeurs dépendent fortement de la machine : elles sont affichées, pas promises. Dans un conteneur sans GPU,
  * le rendu logiciel est bien plus lent qu'un poste réel.
  */
+/** Deux régimes : points (zoom 16,2–17,4) puis silhouettes détaillées (zoom 18,4–19). */
+const REGIMES = [
+  { name: 'points', z0: 16.8, amp: 0.6 },
+  { name: 'silhouettes', z0: 18.7, amp: 0.3 },
+];
+for (const reg of REGIMES)
 for (const extra of [0, 20_000, 50_000]) {
-  test(`mesure du rendu et du moteur avec ${extra} manifestants supplémentaires`, async ({ page }) => {
+  test(`mesure du rendu (${reg.name}) et du moteur avec ${extra} manifestants supplémentaires`, async ({ page }) => {
     await openGame(page, 'autostart=paris&map=schematic');
     await page.evaluate((n) => {
       const d = (window as any).__ORDRE__;
@@ -27,8 +33,9 @@ for (const extra of [0, 20_000, 50_000]) {
     await page.evaluate(() => (window as any).__ORDRE__.resetStats());
     const t0 = await page.evaluate(() => ({ ticks: (window as any).__ORDRE__.ctrl.sim.tick, ms: (window as any).__ORDRE__.ctrl.sim.profile.ticks }));
     await page.evaluate(
-      () =>
+      (r) =>
         new Promise<void>((resolve) => {
+          const reg = r;
           const dbg = (window as any).__ORDRE__;
           const o = dbg.city().center;
           const pl = dbg.ctrl.scenario.places.plaza.pos;
@@ -39,12 +46,13 @@ for (const extra of [0, 20_000, 50_000]) {
           const step = () => {
             const t = (performance.now() - t0) / 1000;
             // caméra autour de la place, zoom 16,2–17,4 : la foule est dessinée individu par individu (pas agrégée en symbole)
-            dbg.jumpTo(lng0 + Math.sin(t) * 0.0004, lat0 + Math.cos(t * 0.7) * 0.0003, 16.8 + 0.6 * Math.sin(t * 0.8));
+            dbg.jumpTo(lng0 + Math.sin(t) * 0.0004, lat0 + Math.cos(t * 0.7) * 0.0003, reg.z0 + reg.amp * Math.sin(t * 0.8));
             if (t < 4) requestAnimationFrame(step);
             else resolve();
           };
           step();
         }),
+      reg,
     );
     const s = await page.evaluate(() => (window as any).__ORDRE__.stats());
     const e = await page.evaluate(() => {
@@ -53,7 +61,7 @@ for (const extra of [0, 20_000, 50_000]) {
     });
     const dt = e.ticks - t0.ticks;
     console.log(
-      `BENCH extra=${extra} manifestants=${e.people} points_dessinés≈${s.dots} ` +
+      `BENCH ${reg.name} extra=${extra} manifestants=${e.people} points_dessinés≈${s.dots} ` +
         `cadence=${s.fps.toFixed(1)}img/s intervalle_p95=${s.frameIntervalP95Ms.toFixed(1)}ms ` +
         `dessin_moyen=${s.avgMs.toFixed(2)}ms p95=${s.p95Ms.toFixed(2)}ms max=${s.maxMs.toFixed(2)}ms ` +
         `tick_moteur_moyen=${dt > 0 ? ((e.ms - t0.ms) / dt).toFixed(2) : 'n/a'}ms (${dt} ticks)`,

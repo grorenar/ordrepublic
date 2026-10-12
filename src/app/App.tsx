@@ -5,6 +5,7 @@ import { findPresetCity } from '../geo/cities';
 import type { City } from '../state/types';
 import { GameScreen, type DebugFlags } from '../ui/GameScreen';
 import { HomeScreen } from '../ui/HomeScreen';
+import { SpriteGallery } from '../ui/SpriteGallery';
 
 /** Paramètres d'URL de test : ?debug &map=test|schematic|osm &autostart=metz */
 function parseFlags(): { debug: DebugFlags; autostart?: City; schematic?: boolean } {
@@ -18,7 +19,12 @@ function parseFlags(): { debug: DebugFlags; autostart?: City; schematic?: boolea
   };
 }
 
+/** Planche de contrôle des sprites : `?gallery` (outil de recette). */
 export function App() {
+  return new URLSearchParams(location.search).has('gallery') ? <SpriteGallery /> : <Main />;
+}
+
+function Main() {
   const [flags] = useState(parseFlags);
   const [settings, setSettings] = useState<Settings>(() => {
     const s = loadSettings();

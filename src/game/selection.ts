@@ -1,7 +1,7 @@
 import type { Vec2 } from '../geo/mercator';
 import { PointGrid } from '../engine/spatialIndex';
 import type { Sim } from '../engine/sim';
-import type { CrowdGroup, Id } from '../engine/types';
+import type { CrowdGroup, Id, MoverEntity } from '../engine/types';
 
 /** Élément sélectionnable : unité, véhicule, groupe de manifestants (et éventuellement un individu précis). */
 export type EntityRef =
@@ -61,6 +61,9 @@ export class SelectionIndex {
   lastComparisons = 0;
   gridBuilds = 0;
 
+  /** Rayon de sélection logique (m) d'une unité ou d'un véhicule : fourni par le manifeste de sprites, jamais par les pixels. */
+  hitRadius: (e: MoverEntity) => number = (e) => (e.entity === 'unit' ? 3 : 5);
+
   constructor(private readonly sim: Sim) {}
 
   private gridFor(g: CrowdGroup): PointGrid {
@@ -85,7 +88,7 @@ export class SelectionIndex {
     for (const u of sim.units) {
       this.lastComparisons++;
       const d = Math.hypot(u.x - p.x, u.y - p.y);
-      if (d <= Math.max(tolM, 3) && d < bestD) {
+      if (d <= Math.max(tolM, this.hitRadius(u)) && d < bestD) {
         bestD = d;
         best = { type: 'unit', id: u.id };
       }
@@ -93,7 +96,7 @@ export class SelectionIndex {
     for (const v of sim.vehicles) {
       this.lastComparisons++;
       const d = Math.hypot(v.x - p.x, v.y - p.y);
-      if (d <= Math.max(tolM, 5) && d < bestD) {
+      if (d <= Math.max(tolM, this.hitRadius(v)) && d < bestD) {
         bestD = d;
         best = { type: 'vehicle', id: v.id };
       }

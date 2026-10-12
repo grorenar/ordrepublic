@@ -1,3 +1,5 @@
+import type { LodTier } from './sprites/types';
+
 /** Niveaux de détail du rendu selon le zoom (valeurs de zoom MapLibre / Web Mercator 512 px). */
 export interface Lod {
   /** Foule agrégée en un symbole avec effectif. */
@@ -6,6 +8,8 @@ export interface Lod {
   shieldFormation: boolean;
   labels: boolean;
   vehicleDetail: boolean;
+  /** Palier des sprites de personnes : 0 agrégé, 1 points, 2 silhouette simple, 3 détaillé. */
+  tier: LodTier;
 }
 
 export function lodForZoom(zoom: number): Lod {
@@ -14,5 +18,6 @@ export function lodForZoom(zoom: number): Lod {
     shieldFormation: zoom >= 15.8,
     labels: zoom >= 15.2,
     vehicleDetail: zoom >= 16.4,
+    tier: zoom < 14.8 ? 0 : zoom < 17.8 ? 1 : zoom < 18.7 ? 2 : 3,
   };
 }

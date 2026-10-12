@@ -1,9 +1,14 @@
 import { LocalFrame, pixelsPerMeter, type Vec2, type ViewState } from '../geo/mercator';
 import type { GameController } from '../game/controller';
 import { groupBox, memberLive, sameRef, type EntityRef } from '../game/selection';
-import type { ForceKind, MoverEntity, UnitEntity, UnitStatus, VehicleEntity, VehicleKind } from '../engine/types';
+import type { CrowdGroup, ForceKind, MoverEntity } from '../engine/types';
 import type { GameZone } from '../state/types';
 import { lodForZoom, type Lod } from './lod';
+import { defaultManifest, forceSpriteId, ManifestIndex, PERSON_COLORS, vehicleSpriteId, VEHICLE_DIMENSIONS } from './sprites/manifest';
+import { ProceduralSpriteProvider } from './sprites/procedural';
+import { MARKERS, ringMarker, STATUS_MARKERS, statusMarker } from './sprites/markers';
+import { buildSnapshot, crowdPose, orientationIndex, type RenderablePose, type RenderableSnapshot, type RenderableUnit, type RenderableVehicle } from './sprites/snapshot';
+import type { SpriteProvider, SpriteQuery, SpriteRegion } from './sprites/types';
 
 const COLORS = {
   accent: '#22d3ee',
@@ -18,15 +23,6 @@ const COLORS = {
   pill: 'rgba(8,12,20,0.82)',
 };
 
-const STATUS_RING: Record<UnitStatus, { color: string; dash: number[] | null }> = {
-  idle: { color: '#f8fafc', dash: null },
-  moving: { color: '#4ade80', dash: [6, 4] },
-  waiting: { color: '#fbbf24', dash: [3, 4] },
-  engaged: { color: '#f87171', dash: [6, 4] },
-  in_difficulty: { color: '#f97316', dash: [2, 3] },
-  unavailable: { color: '#94a3b8', dash: [2, 5] },
-};
-
 const FORCE_STYLE: Record<ForceKind, { code: string; fill: string; edge: string }> = {
   crs: { code: 'CRS', fill: '#1d4ed8', edge: '#bfdbfe' },
   police_nationale: { code: 'POL', fill: '#38bdf8', edge: '#e0f2fe' },
@@ -34,20 +30,19 @@ const FORCE_STYLE: Record<ForceKind, { code: string; fill: string; edge: string 
   unite_speciale: { code: 'US', fill: '#374151', edge: '#d1d5db' },
 };
 
-/** Dimensions (longueur, largeur en m), couleur de caisse, bande, gyrophare. */
-const VEHICLE_STYLE: Record<VehicleKind, { len: number; wid: number; body: string; stripe: string; lights: 'blue' | 'emergency' | 'none'; label: string }> = {
-  fourgon_police: { len: 6.2, wid: 2.3, body: '#1e3a8a', stripe: '#93c5fd', lights: 'blue', label: 'Fourgon de police' },
-  fourgon_crs: { len: 6.8, wid: 2.4, body: '#1e40af', stripe: '#bfdbfe', lights: 'blue', label: 'Transport CRS' },
-  voiture_police: { len: 4.7, wid: 1.9, body: '#f1f5f9', stripe: '#1d4ed8', lights: 'blue', label: 'Véhicule de police' },
-  ambulance: { len: 6.2, wid: 2.4, body: '#ffffff', stripe: '#ef4444', lights: 'emergency', label: 'Ambulance' },
-  camion_pompiers: { len: 9.6, wid: 2.7, body: '#dc2626', stripe: '#fde68a', lights: 'emergency', label: 'Sapeurs-pompiers' },
-  vehicule_secours_leger: { len: 4.8, wid: 1.9, body: '#fde047', stripe: '#dc2626', lights: 'emergency', label: 'Secours léger' },
-  vehicule_gendarmerie: { len: 4.8, wid: 1.9, body: '#1e293b', stripe: '#60a5fa', lights: 'blue', label: 'Véhicule de gendarmerie' },
-  voiture_banalisee: { len: 4.5, wid: 1.8, body: '#64748b', stripe: '#cbd5e1', lights: 'none', label: 'Véhicule banalisé' },
-  moto_police: { len: 2.2, wid: 0.9, body: '#0f172a', stripe: '#38bdf8', lights: 'blue', label: 'Moto de police' },
-  camion_a_eau: { len: 9, wid: 3, body: '#334155', stripe: '#38bdf8', lights: 'blue', label: 'Lanceur d’eau' },
+const VEHICLE_LIGHTS: Record<keyof typeof VEHICLE_DIMENSIONS, 'blue' | 'emergency' | 'none'> = {
+  fourgon_police: 'blue',
+  fourgon_crs: 'blue',
+  voiture_police: 'blue',
+  ambulance: 'emergency',
+  camion_pompiers: 'emergency',
+  vehicule_secours_leger: 'emergency',
+  vehicule_gendarmerie: 'blue',
+  voiture_banalisee: 'none',
+  moto_police: 'blue',
+  camion_a_eau: 'blue',
 };
-export const VEHICLE_LABEL: Record<VehicleKind, string> = Object.fromEntries(Object.entries(VEHICLE_STYLE).map(([k, v]) => [k, v.label])) as Record<VehicleKind, string>;
+export const VEHICLE_LABEL = Object.fromEntries(Object.entries(VEHICLE_DIMENSIONS).map(([k, v]) => [k, v.label])) as Record<keyof typeof VEHICLE_DIMENSIONS, string>;
 export const FORCE_CODE: Record<ForceKind, string> = Object.fromEntries(Object.entries(FORCE_STYLE).map(([k, v]) => [k, v.code])) as Record<ForceKind, string>;
 
 export interface FrameStats {
@@ -69,6 +64,8 @@ export interface ScreenTarget {
 
 /** Budget de points de foule tracés par image (échantillonnage uniforme au-delà). */
 export const DOT_BUDGET = 9000;
+/** Budget de silhouettes (sprites) par image : plus coûteuses que des points. */
+export const SPRITE_BUDGET = 6000;
 
 const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 
@@ -96,6 +93,13 @@ export class GameRenderer {
   hover: EntityRef | null = null;
   /** Obscurité (0 jour … 1 nuit) : voile bleuté sous les pions, qui restent bien visibles. */
   darkness = 0;
+  /** Fournisseur de sprites (procédural par défaut) : interchangeable sans toucher au moteur ni à l'interface. */
+  sprites: SpriteProvider;
+  /** Manifeste actif : tailles réelles, rayons de sélection, orientations. */
+  manifest: ManifestIndex;
+  /** Dernier instantané de rendu (positions interpolées, données sémantiques). */
+  snapshot: RenderableSnapshot | null = null;
+  private readonly pose: RenderablePose = { x: 0, y: 0, dir: 0, variant: 0, walking: false, seed: 0 };
   /** Fond aérien : les individus sont cerclés d'un liseré sombre pour rester lisibles sur la photo. */
   aerial = false;
   /** Mode « Aller ici » actif : curseur de ciblage dessiné par l'interface. */
@@ -120,12 +124,16 @@ export class GameRenderer {
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('Canvas 2D indisponible');
     this.ctx = ctx;
+    this.manifest = new ManifestIndex(defaultManifest());
+    const procedural = new ProceduralSpriteProvider(this.manifest);
+    this.sprites = procedural;
     this.reducedMotion = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (this.reducedMotion) this.motion = 0;
   }
 
   setController(c: GameController | null, origin?: { lng: number; lat: number }): void {
     this.ctrl = c;
+    if (c) c.picker.hitRadius = (e) => this.manifest.hitRadiusM(e.entity === 'unit' ? forceSpriteId(e.force, e.loadout) : vehicleSpriteId(e.vehicle));
     this.frame = origin ? new LocalFrame(origin) : null;
   }
 
@@ -251,6 +259,7 @@ export class GameRenderer {
     if (this.ctrl && this.frame && this.cssW > 1) {
       this.setProjection(view);
       this.drawScene(this.ctrl, view, nowMs / 1000);
+      this.sprites.flush?.();
     }
     this.frameCount++;
     this.durations.push(performance.now() - t0);
@@ -265,6 +274,7 @@ export class GameRenderer {
       this.cssW = w;
       this.cssH = h;
       this.dpr = dpr;
+      this.sprites.setDevicePixelRatio?.(dpr);
       this.canvas.width = Math.round(w * dpr);
       this.canvas.height = Math.round(h * dpr);
       this.canvas.style.width = `${w}px`;
@@ -284,8 +294,10 @@ export class GameRenderer {
     if (on('streets')) this.drawStreets(c, t, lod);
     if (on('routes')) this.drawRoutes(c, alpha, t);
     if (on('crowd')) this.drawCrowds(c, alpha, lod, t);
-    if (on('vehicles')) for (const v of c.sim.vehicles) this.drawVehicle(c, v, alpha, t, lod);
-    if (on('units')) for (const u of c.sim.units) this.drawUnit(c, u, alpha, t, lod);
+    const snap = buildSnapshot(c, alpha, t);
+    this.snapshot = snap;
+    if (on('vehicles')) for (const v of snap.vehicles) this.drawVehicle(c, v, t, lod);
+    if (on('units')) for (const u of snap.units) this.drawUnit(c, u, t, lod);
   }
 
   // -- zone, rues ---------------------------------------------------------
@@ -509,6 +521,12 @@ export class GameRenderer {
         continue;
       }
 
+      if (lod.tier >= 2) {
+        this.drawPeople(g, alpha, lod.tier, total, selected || hovered ? tone : tone, t);
+        if (selected || hovered) this.crowdOutline(centre, rPx, selected, t);
+        if (lod.labels) this.pill(`${g.label} · ${n}`, centre.x, centre.y - Math.min(rPx, 200) - 14, { size: 11, bg: COLORS.pill, border: tone });
+        continue;
+      }
       // individus : échantillonnage régulier selon le budget global
       const stride = Math.max(1, Math.ceil(total / DOT_BUDGET));
       ctx.save();
@@ -563,19 +581,78 @@ export class GameRenderer {
     }
   }
 
-  // -- forces -------------------------------------------------------------
-
-  private interp(e: MoverEntity, alpha: number): { x: number; y: number; h: number } {
-    return {
-      x: e.px + (e.x - e.px) * alpha,
-      y: e.py + (e.y - e.py) * alpha,
-      h: e.prevHeading + wrap(e.heading - e.prevHeading) * alpha,
-    };
+  /** Individus en silhouettes (paliers T2/T3) : sprites orientés et animés, échantillon stable par permutation fixe. */
+  private drawPeople(g: CrowdGroup, alpha: number, tier: SpriteQuery['tier'], total: number, _tone: string, t: number): void {
+    const m = g.members;
+    const stride = Math.max(1, Math.ceil(total / SPRITE_BUDGET));
+    const first = Math.max(m.activeStart, g.entryStart) + ((g.seed >>> 0) % stride);
+    const lastI = Math.min(m.n, g.exitStart);
+    const bl = g.blocks;
+    const pose = this.pose;
+    const q: SpriteQuery = { id: 'person', variant: 0, orientation: 0, frame: 0, tier, ppm: this.ppm, deferred: true };
+    const dotR = Math.max(1.2, Math.min(3.2, 0.3 * this.ppm));
+    const tf = Math.floor(t * 3);
+    const W = this.cssW + 12;
+    const H = this.cssH + 12;
+    const { ctx } = this;
+    let drawn = 0;
+    for (let i = first; i < lastI; i += stride) {
+      if (bl ? (bl.level[Math.floor(i / bl.size)] as number) === 0 : g.level === 0) continue;
+      crowdPose(g, i, alpha, pose);
+      const sx = this.cx + (pose.x - this.mx) * this.ppm;
+      const sy = this.cy - (pose.y - this.my) * this.ppm;
+      if (sx < -12 || sy < -12 || sx > W || sy > H) continue;
+      q.variant = pose.variant;
+      q.orientation = orientationIndex(pose.dir, 8);
+      q.frame = pose.walking ? 1 + ((tf + pose.seed) & 1) : 0;
+      const r = this.sprites.get(q);
+      if (!r) {
+        // sprite en préparation : point provisoire (jamais de trou dans la foule)
+        ctx.fillStyle = PERSON_COLORS[pose.variant % PERSON_COLORS.length] as string;
+        ctx.fillRect(sx - dotR, sy - dotR, dotR * 2, dotR * 2);
+        continue;
+      }
+      ctx.drawImage(r.image, r.sx, r.sy, r.sw, r.sh, sx + r.ox, sy + r.oy, r.w, r.h);
+      drawn++;
+    }
+    this.lastDots += drawn;
   }
 
-  private drawUnit(c: GameController, u: UnitEntity, alpha: number, t: number, lod: Lod): void {
-    const ip = this.interp(u, alpha);
-    const p = this.toScreen(ip);
+  private crowdOutline(centre: Vec2, rPx: number, selected: boolean, t: number): void {
+    const { ctx } = this;
+    ctx.save();
+    ctx.beginPath();
+    ctx.ellipse(centre.x, centre.y, rPx * 1.05 + 10, rPx * 1.05 + 10, 0, 0, Math.PI * 2);
+    ctx.setLineDash([6, 5]);
+    ctx.lineDashOffset = -t * 12 * this.motion;
+    ctx.strokeStyle = selected ? COLORS.accent : 'rgba(255,255,255,0.55)';
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // -- forces -------------------------------------------------------------
+
+  /** Dessine une région d'atlas centrée en (x, y), pivotée de `rot` rad (sens écran horaire = -cap). */
+  private blit(r: SpriteRegion, x: number, y: number, rot: number): void {
+    const { ctx } = this;
+    if (rot === 0) {
+      ctx.drawImage(r.image, r.sx, r.sy, r.sw, r.sh, x + r.ox, y + r.oy, r.w, r.h);
+      return;
+    }
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rot);
+    ctx.drawImage(r.image, r.sx, r.sy, r.sw, r.sh, r.ox, r.oy, r.w, r.h);
+    ctx.restore();
+  }
+
+  private spriteQuery(id: string, tier: SpriteQuery['tier'], variant = 0, frame = 0): SpriteQuery {
+    return { id, variant, orientation: 0, frame, tier, ppm: this.ppm };
+  }
+
+  private drawUnit(c: GameController, u: RenderableUnit, t: number, lod: Lod): void {
+    const p = this.toScreen(u);
     if (p.x < -80 || p.y < -80 || p.x > this.cssW + 80 || p.y > this.cssH + 80) return;
     const ref: EntityRef = { type: 'unit', id: u.id };
     const selected = c.isSelected(ref);
@@ -584,55 +661,40 @@ export class GameRenderer {
     const style = FORCE_STYLE[u.force];
     const { ctx } = this;
     const heavy = u.force === 'crs' || u.force === 'gendarmerie_mobile';
-    ctx.save();
-    ctx.translate(p.x, p.y);
-    ctx.rotate(-ip.h);
     let hitR: number;
     if (lod.shieldFormation) {
+      // formation : un sprite par groupe de 3 agents (CRS et gendarmerie mobile), jamais plus de quelques silhouettes
       const n = heavy ? Math.max(5, Math.round(u.headcount / 3)) : 3;
-      const size = Math.max(10, Math.min(24, (heavy ? 3.4 : 2.6) * this.ppm));
-      const spacing = size * 0.92;
+      const spacingM = 0.95;
+      const frame = u.status === 'moving' ? 1 + (Math.floor(t * 3) & 1) : 0;
+      const q = this.spriteQuery(u.sprite, 3, 0, frame);
+      const region = this.sprites.get(q);
+      const spacing = spacingM * this.ppm;
       const span = (n - 1) * spacing;
-      for (let i = 0; i < n; i++) this.shieldGlyph(ctx, size * 0.15, i * spacing - span / 2, size, style);
-      hitR = Math.max(span / 2 + size, 16);
+      if (region) {
+        const cs = Math.cos(-u.heading);
+        const sn = Math.sin(-u.heading);
+        for (let i = 0; i < n; i++) {
+          const off = i * spacing - span / 2; // ligne perpendiculaire au cap
+          this.blit(region, p.x - sn * off, p.y + cs * off, -u.heading);
+        }
+      }
+      hitR = Math.max(span / 2 + (region ? region.w / 2 : 0), 16);
     } else {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(-u.heading);
       const size = heavy ? 26 : 20;
       this.shieldGlyph(ctx, 0, 0, size, style);
-      hitR = size;
+      ctx.restore();
+      hitR = heavy ? 26 : 20;
     }
-    ctx.restore();
-    // anneau d'état
-    const ring = STATUS_RING[u.status];
-    this.statusRing(p, hitR + 3, ring.color, ring.dash, t, u.status === 'moving' ? ip.h : null);
+    const ring = STATUS_MARKERS[u.status];
+    statusMarker(ctx, p.x, p.y, hitR + 3, ring, t, this.motion, u.status === 'moving' ? u.heading : null);
     if (selected) this.ring(p, hitR + 8, COLORS.accent, t);
-    else if (hovered) this.ring(p, hitR + 6, 'rgba(255,255,255,0.6)');
+    else if (hovered) this.ring(p, hitR + 6, MARKERS.hover.color);
     this.pill(`${style.code} ${u.num}`, p.x, p.y - hitR - 11, { size: 11, bg: 'rgba(8,18,50,0.92)', border: selected ? COLORS.accent : style.edge, bold: true });
     if (lod.labels && (selected || hovered)) this.pill(`${u.headcount} agents · ${(u.speedMps * 3.6).toFixed(1)} km/h`, p.x, p.y + hitR + 13, { size: 10, bg: COLORS.pill, border: 'transparent' });
-  }
-
-  private statusRing(p: Vec2, r: number, color: string, dash: number[] | null, t: number, heading: number | null): void {
-    const { ctx } = this;
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-    ctx.setLineDash(dash ?? []);
-    ctx.lineDashOffset = -t * 10 * this.motion;
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    if (heading !== null) {
-      ctx.translate(p.x, p.y);
-      ctx.rotate(-heading);
-      ctx.setLineDash([]);
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.moveTo(r + 7, 0);
-      ctx.lineTo(r - 1, -5);
-      ctx.lineTo(r - 1, 5);
-      ctx.closePath();
-      ctx.fill();
-    }
-    ctx.restore();
   }
 
   /** Bouclier de gameplay (pictogramme), dessiné vers +x (le « devant » de l'unité). */
@@ -659,78 +721,56 @@ export class GameRenderer {
     ctx.restore();
   }
 
-  private drawVehicle(c: GameController, v: VehicleEntity, alpha: number, t: number, lod: Lod): void {
-    const ip = this.interp(v, alpha);
-    const p = this.toScreen(ip);
+  private drawVehicle(c: GameController, v: RenderableVehicle, t: number, lod: Lod): void {
+    const p = this.toScreen(v);
     if (p.x < -80 || p.y < -80 || p.x > this.cssW + 80 || p.y > this.cssH + 80) return;
-    const st = VEHICLE_STYLE[v.vehicle];
+    const dims = VEHICLE_DIMENSIONS[v.vehicle];
     const ref: EntityRef = { type: 'vehicle', id: v.id };
     const selected = c.isSelected(ref);
     const hovered = sameRef(this.hover, ref);
     this.targets.push({ ref, x: p.x, y: p.y });
-    const len = Math.max(15, st.len * this.ppm);
-    const wid = Math.max(7, st.wid * this.ppm);
+    const len = Math.max(15, dims.len * this.ppm);
+    const wid = Math.max(7, dims.wid * this.ppm);
     const { ctx } = this;
-    ctx.save();
-    ctx.translate(p.x, p.y);
-    ctx.rotate(-ip.h);
-    ctx.fillStyle = 'rgba(0,0,0,0.35)';
-    this.roundRectPath(-len / 2 + 1, -wid / 2 + 2, len, wid, Math.min(4, wid * 0.3));
-    ctx.fill();
-    ctx.fillStyle = st.body;
-    this.roundRectPath(-len / 2, -wid / 2, len, wid, Math.min(4, wid * 0.3));
-    ctx.fill();
-    ctx.lineWidth = 1.2;
-    ctx.strokeStyle = 'rgba(0,0,0,0.65)';
-    ctx.stroke();
-    ctx.fillStyle = st.stripe;
-    ctx.fillRect(-len / 2 + 2, -wid * 0.08, len - 4, wid * 0.16);
-    ctx.fillStyle = 'rgba(15,23,42,0.75)';
-    ctx.fillRect(len * 0.22, -wid * 0.36, len * 0.14, wid * 0.72);
-    if (st.lights !== 'none') {
+    const region = this.sprites.get(this.spriteQuery(v.sprite, 3));
+    if (region) this.blit(region, p.x, p.y, -v.heading);
+    const lights = VEHICLE_LIGHTS[v.vehicle];
+    if (lights !== 'none') {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(-v.heading);
       // gyrophares : allumés (et clignotants) seulement quand les avertisseurs sont actifs
-      const phase = v.emergency && Math.sin(t * 9 + v.callsign.length) > 0 && this.motion >= 0;
-      const on = v.emergency;
+      const phase = v.emergency && Math.sin(t * 9 + v.callsign.length) > 0;
       const flash = (x: number, y: number, color: string) => {
         ctx.fillStyle = color;
         ctx.beginPath();
         ctx.arc(x, y, Math.max(2, wid * 0.14), 0, Math.PI * 2);
         ctx.fill();
       };
-      if (!on) {
-        // avertisseurs coupés : feux éteints
+      if (!v.emergency) {
         flash(len * 0.28, -wid * 0.28, 'rgba(100,116,139,0.7)');
         flash(len * 0.28, wid * 0.28, 'rgba(100,116,139,0.7)');
-      } else if (st.lights === 'emergency') {
+      } else if (lights === 'emergency') {
         flash(len * 0.3, -wid * 0.3, phase ? '#ff2d2d' : '#3b82f6');
         flash(len * 0.3, wid * 0.3, phase ? '#3b82f6' : '#ff2d2d');
       } else {
         flash(len * 0.25, -wid * 0.28, phase ? '#3b82f6' : 'rgba(59,130,246,0.25)');
         flash(len * 0.25, wid * 0.28, phase ? 'rgba(59,130,246,0.25)' : '#3b82f6');
       }
+      ctx.restore();
     }
-    ctx.restore();
     const hit = Math.max(len, wid) * 0.6 + 4;
-    const ring = STATUS_RING[v.status];
-    if (v.status !== 'idle') this.statusRing(p, hit + 2, ring.color, ring.dash, t, v.status === 'moving' ? ip.h : null);
+    const ring = STATUS_MARKERS[v.status];
+    if (v.status !== 'idle') statusMarker(ctx, p.x, p.y, hit + 2, ring, t, this.motion, v.status === 'moving' ? v.heading : null);
     if (selected) this.ring(p, hit + 7, COLORS.accent, t);
-    else if (hovered) this.ring(p, hit + 5, 'rgba(255,255,255,0.6)');
+    else if (hovered) this.ring(p, hit + 5, MARKERS.hover.color);
     if (lod.vehicleDetail || selected || hovered) this.pill(v.callsign, p.x, p.y + hit + 9, { size: 10, bg: COLORS.pill, border: selected ? COLORS.accent : 'transparent' });
   }
 
   // -- primitives ---------------------------------------------------------
 
   private ring(c: Vec2, r: number, color: string, t = 0): void {
-    const { ctx } = this;
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
-    ctx.setLineDash([7, 5]);
-    ctx.lineDashOffset = -t * 18 * this.motion;
-    ctx.lineWidth = 2.2;
-    ctx.strokeStyle = color;
-    ctx.stroke();
-    ctx.restore();
+    ringMarker(this.ctx, c.x, c.y, r, { color, width: MARKERS.selection.width, dash: MARKERS.selection.dash }, t, this.motion);
   }
 
   private pill(text: string, x: number, y: number, o: { size: number; bg: string; border: string; bold?: boolean; align?: 'center' | 'left' }): void {
