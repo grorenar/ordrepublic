@@ -111,6 +111,70 @@ export interface SimParams {
 
   // --- états de rue / navigation -------------------------------------------------
   /** Recalcul des états de rue tous les N ticks. */
+  /** Monde : décor et lieux d'intérêt générés de façon déterministe le long des rues (phase 4). */
+  world: {
+    binSpacingM: number;
+    benchSpacingM: number;
+    shelterSpacingM: number;
+    containerSpacingM: number;
+    shopSpacingM: number;
+    /** Espacement des commerces fictifs dans une « rue commerçante » (d'après la densité de commerces OSM). */
+    shopSpacingCommercialM: number;
+    /** Nombre de commerces OSM à moins de `commercialRadiusM` d'un point pour qualifier la rue de commerçante. */
+    commercialShopCount: number;
+    commercialRadiusM: number;
+    /** Plafond du nombre d'objets de décor générés (protège la mémoire). */
+    maxDecor: number;
+    /** Distance minimale (m) entre un objet de décor et l'axe de la rue. */
+    minOffsetM: number;
+  };
+  /** Incidents : déclenchement par la foule, escalade, propagation, confinement, conséquences (phase 4). */
+  incidents: {
+    /** Période d'évaluation des incidents (ticks). */
+    everyTicks: number;
+    /** Tension (0–100) à partir de laquelle une foule peut provoquer un incident. */
+    triggerTension: number;
+    /** Distance (m) maximale entre un individu de la foule et un objet pour que celui-ci soit à portée. */
+    reachM: number;
+    /** Probabilité par seconde, pour un objet à portée d'une foule à tension 100 et d'au moins `crowdFullSize` personnes. */
+    baseRatePerS: number;
+    crowdFullSize: number;
+    /** Délai (s) avant qu'un même groupe provoque un nouvel incident. */
+    cooldownS: number;
+    /** Nombre maximal d'incidents actifs simultanés. */
+    maxActive: number;
+    /** Distance (m) d'une unité qui « surveille » un incident ; elle réduit aussi les risques de déclenchement. */
+    unitWatchM: number;
+    /** Multiplicateur de la probabilité de déclenchement d'un incident à portée d'une unité (< 1 : dissuasion). */
+    unitDeterrence: number;
+    /** Secondes de présence continue d'une unité pour confiner un incendie. */
+    containAfterS: number;
+    /** Secondes sans surveillance entre deux aggravations d'un incendie. */
+    escalateEveryS: number;
+    /** Distance (m) de propagation d'un incendie vers un objet inflammable voisin. */
+    spreadReachM: number;
+    /** Probabilité par seconde et par niveau de gravité de propagation à un objet voisin. */
+    spreadRatePerSeverity: number;
+    emergingS: number;
+    /** Durées naturelles (s) : feu de poubelle, incendie, acte de dégradation, persistance (fumée, ruines) après la fin. */
+    binFireS: number;
+    fireS: number;
+    damageActS: number;
+    lingerS: number;
+    /** Hausse de tension d'un groupe à portée à la naissance d'un incident (par niveau de gravité). */
+    tensionPerSeverity: number;
+    /** Rayon (m) dans lequel un incident affecte les groupes de foule. */
+    affectRadiusM: number;
+    /** Retour de la tension vers sa valeur de fond (points par seconde). */
+    tensionDecayPerS: number;
+    /** Coût fictif (€) par type d'objet endommagé. */
+    costBinEur: number;
+    costBenchEur: number;
+    costShelterEur: number;
+    costContainerEur: number;
+    costWindowEur: number;
+    costShopDestroyedEur: number;
+  };
   streetStateEveryTicks: number;
   /** Nouvelle tentative de route pour un groupe en attente tous les N ticks. */
   waitRetryTicks: number;
@@ -166,6 +230,36 @@ export const DEFAULT_SIM_PARAMS: SimParams = {
   noiseAmplitudeM: 0.25,
   blendMaxSpeedMps: 3,
   lod: { defaultLevel: 2, n2RadiusM: 400, n1RadiusM: 2500, blockSize: 256, blockMinGroupSize: 4000, hysteresis: 0.1 },
+  world: { binSpacingM: 70, benchSpacingM: 180, shelterSpacingM: 260, containerSpacingM: 200, shopSpacingM: 100, shopSpacingCommercialM: 35, commercialShopCount: 3, commercialRadiusM: 80, maxDecor: 8000, minOffsetM: 1.2 },
+  incidents: {
+    everyTicks: 10,
+    triggerTension: 40,
+    reachM: 25,
+    baseRatePerS: 0.01,
+    crowdFullSize: 900,
+    cooldownS: 60,
+    maxActive: 12,
+    unitWatchM: 30,
+    unitDeterrence: 0.25,
+    containAfterS: 20,
+    escalateEveryS: 45,
+    spreadReachM: 7,
+    spreadRatePerSeverity: 0.006,
+    emergingS: 5,
+    binFireS: 420,
+    fireS: 900,
+    damageActS: 20,
+    lingerS: 90,
+    tensionPerSeverity: 3,
+    affectRadiusM: 60,
+    tensionDecayPerS: 0.3,
+    costBinEur: 150,
+    costBenchEur: 400,
+    costShelterEur: 3000,
+    costContainerEur: 1200,
+    costWindowEur: 2500,
+    costShopDestroyedEur: 40000,
+  },
   streetStateEveryTicks: 5,
   waitRetryTicks: 10,
   lookAheadM: 15,

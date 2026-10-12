@@ -49,8 +49,8 @@ export interface LiveResult {
   endpoint?: string;
 }
 
-/** Clé de cache : secteur arrondi à ~10 m (4 décimales) + taille. */
-export const zoneKey = (c: LngLat, hw: number, hh: number): string => `zone:${c.lat.toFixed(4)},${c.lng.toFixed(4)},${Math.round(hw)}x${Math.round(hh)}`;
+/** Clé de cache : secteur arrondi à ~10 m (4 décimales) + taille. `zone2` : les secteurs téléchargés avant la phase 4 n’ont pas de lieux d’intérêt et sont donc retéléchargés. */
+export const zoneKey = (c: LngLat, hw: number, hh: number): string => `zone2:${c.lat.toFixed(4)},${c.lng.toFixed(4)},${Math.round(hw)}x${Math.round(hh)}`;
 
 export async function loadZoneGraph(center: LngLat, half: { halfWidth: number; halfHeight: number }, name: string, o: LiveOptions = {}): Promise<LiveResult> {
   const progress = o.onProgress ?? (() => undefined);

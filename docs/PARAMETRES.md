@@ -83,6 +83,48 @@ Contrôles de cohérence appliqués à la création d’un `Sim` (`validateSimPa
 | `lod.blockMinGroupSize` | individus | 4000 | Effectif à partir duquel un groupe en marche est découpé en blocs de niveaux distincts. | En dessous : un seul niveau pour le groupe (pas de complexité inutile). |
 | `lod.hysteresis` | ratio | 0.1 | Marge relative avant de rétrograder un niveau. | Évite l’oscillation de niveau d’un bloc situé à la frontière d’un seuil. |
 
+## Monde et incidents
+
+| Paramètre | Unité | Défaut | Signification | Effet sur la simulation |
+|---|---|---|---|---|
+| `world.binSpacingM` | m | 70 | Espacement moyen des poubelles synthétiques le long des rues. | Plus petit : plus de poubelles, donc plus de cibles possibles de feux de poubelle. |
+| `world.benchSpacingM` | m | 180 | Espacement moyen des bancs synthétiques (rues larges, places, parcs). | Nombre d’objets de mobilier pouvant être dégradés. |
+| `world.shelterSpacingM` | m | 260 | Espacement moyen des abribus fictifs sur les artères. | Nombre d’abribus pouvant être endommagés. |
+| `world.containerSpacingM` | m | 200 | Espacement moyen des conteneurs synthétiques (rues secondaires). | Nombre de conteneurs pouvant brûler (incendie plus durable qu’une poubelle). |
+| `world.shopSpacingM` | m | 100 | Espacement moyen des commerces FICTIFS le long d’une rue ordinaire. | Les vitrines fictives sont les seules cibles de bris de vitrine ; jamais un commerce réel. |
+| `world.shopSpacingCommercialM` | m | 35 | Espacement des commerces fictifs dans une rue qualifiée de commerçante. | Plus de vitrines fictives dans les rues où OSM recense de nombreux commerces (seule information tirée d’OSM sur les commerces). |
+| `world.commercialShopCount` | nombre | 3 | Nombre de commerces OSM proches pour qualifier une rue de « commerçante ». | Seuil de la catégorie générale de rue ; aucun établissement réel n’est classé ni ciblé. |
+| `world.commercialRadiusM` | m | 80 | Rayon de comptage des commerces OSM pour la catégorie de rue. | Plus grand : davantage de rues sont qualifiées de commerçantes. |
+| `world.maxDecor` | objets | 8000 | Plafond du nombre d’objets de décor générés. | Protège la mémoire et le temps de rendu sur de très grandes zones. |
+| `world.minOffsetM` | m | 1.2 | Distance minimale entre un objet de décor et l’axe de la rue. | Évite de poser des objets au milieu de la chaussée. |
+| `incidents.everyTicks` | ticks | 10 | Période d’évaluation des incidents. | Plus grand : moins de calcul, réactivité moindre (10 ticks = 1 s de jeu). |
+| `incidents.triggerTension` | 0–100 | 40 | Tension d’un groupe à partir de laquelle il peut provoquer un incident. | Plus haut : la foule doit être plus tendue avant le moindre dégât. |
+| `incidents.reachM` | m | 25 | Distance entre un individu du groupe et un objet pour qu’il soit à portée. | Plus grand : plus d’objets exposés autour d’une foule. |
+| `incidents.baseRatePerS` | 1/s | 0.01 | Probabilité par seconde de dégradation d’un objet à portée d’une grande foule à tension maximale. | Pondérée par la tension au-dessus du seuil et par la taille de la foule ; réduite si une unité est proche. |
+| `incidents.crowdFullSize` | personnes | 900 | Effectif à partir duquel la taille de la foule ne réduit plus la probabilité. | Sous cet effectif, la probabilité est proportionnelle à la racine de l’effectif. |
+| `incidents.cooldownS` | s | 60 | Délai avant qu’un même groupe provoque un nouvel incident. | Évite les rafales d’incidents d’un seul groupe. |
+| `incidents.maxActive` | incidents | 12 | Nombre maximal d’incidents actifs simultanés. | Plafonne la charge de calcul et la lisibilité. |
+| `incidents.unitWatchM` | m | 30 | Distance d’une unité qui surveille un incident ou un objet. | Une unité proche dissuade (déclenchement réduit) et permet de confiner un incendie. |
+| `incidents.unitDeterrence` | multiple (0–1) | 0.25 | Multiplicateur de la probabilité de déclenchement à portée d’une unité. | Plus bas : la présence d’unités protège mieux le mobilier. |
+| `incidents.containAfterS` | s | 20 | Présence continue d’une unité pour confiner un incendie (périmètre tenu, plus de propagation). | Le confinement n’éteint pas le feu : l’extinction relève des secours (phase 6). |
+| `incidents.escalateEveryS` | s | 45 | Durée sans surveillance entre deux aggravations d’un incendie. | Plus court : les incendies non surveillés s’aggravent plus vite. |
+| `incidents.spreadReachM` | m | 7 | Distance de propagation d’un incendie vers un objet inflammable voisin. | Plus grand : les incendies gagnent des objets plus éloignés. |
+| `incidents.spreadRatePerSeverity` | 1/s par niveau | 0.006 | Probabilité par seconde et par niveau de gravité de propagation. | Un incendie non confiné de gravité élevée se propage plus vite. |
+| `incidents.emergingS` | s | 5 | Durée de la phase « naissant » d’un incident. | Délai avant que l’incident ne soit actif (visible et mesurable). |
+| `incidents.binFireS` | s | 420 | Durée naturelle d’un feu de poubelle. | Au terme, l’objet est brûlé (débris) et l’incident persiste un temps (fumée). |
+| `incidents.fireS` | s | 900 | Durée naturelle d’un incendie (conteneur, vitrine…). | Plus long : dégâts et propagation plus importants. |
+| `incidents.damageActS` | s | 20 | Durée de l’acte de dégradation (bris, destruction de mobilier). | Phase « actif » avant que l’incident ne se résorbe ; les dégâts, eux, restent. |
+| `incidents.lingerS` | s | 90 | Persistance d’un incident après sa fin (fumée, ruines, verre brisé). | État « persistant » avant « résolu ». |
+| `incidents.tensionPerSeverity` | points par niveau | 3 | Hausse de tension des groupes proches à la naissance d’un incident. | Retombée de la tension après un incident : plus grand = effet d’entraînement plus fort. |
+| `incidents.affectRadiusM` | m | 60 | Rayon dans lequel un incident affecte les groupes de foule (marquage « affecté », tension). | Plus grand : plus de groupes réagissent. |
+| `incidents.tensionDecayPerS` | points/s | 0.3 | Retour de la tension d’un groupe vers sa valeur de fond. | Plus grand : la tension retombe plus vite après un incident. |
+| `incidents.costBinEur` | € (fictif) | 150 | Coût fictif d’une poubelle détruite. | Alimente le compteur de dégâts (bilan). |
+| `incidents.costBenchEur` | € (fictif) | 400 | Coût fictif d’un banc ou d’une barrière endommagé. | Alimente le compteur de dégâts (bilan). |
+| `incidents.costShelterEur` | € (fictif) | 3000 | Coût fictif d’un abribus endommagé. | Alimente le compteur de dégâts (bilan). |
+| `incidents.costContainerEur` | € (fictif) | 1200 | Coût fictif d’un conteneur incendié. | Alimente le compteur de dégâts (bilan). |
+| `incidents.costWindowEur` | € (fictif) | 2500 | Coût fictif d’une vitrine brisée. | Alimente le compteur de dégâts (bilan). |
+| `incidents.costShopDestroyedEur` | € (fictif) | 40000 | Coût fictif d’un commerce fictif détruit par un incendie. | Alimente le compteur de dégâts (bilan). |
+
 ## Rues et navigation
 
 | Paramètre | Unité | Défaut | Signification | Effet sur la simulation |

@@ -341,8 +341,8 @@ Mode carrière, météo/jour-nuit dynamiques, multi-villes simultanées, bruit/a
 |---|---|---|
 | 1 | Analyse et cahier des charges | ✅ validée |
 | 2 | Prototype cartographique et interface (OSM/MapLibre, fond schématique, rendu Canvas 2D, pions de démonstration) | ✅ livrée, en attente d'un test sur services réels |
-| 3 | **Moteur de simulation et navigation** : graphe indépendant, groupes logiques et individus simulés à grande échelle (objectif de test 50 000), cortèges / rassemblements statiques / groupes secondaires, transitions causales, déplacements d'unités et de véhicules, temps/pause, **interfaces pour le futur système de sprites** — découpée en **3a/3b (jusqu'à la validation intermédiaire)** puis **3c/3d** | **en cours** |
-| 4 | **Incidents et lieux d'intérêt (POI)** : POI issus d'OSM + objets de scénario synthétiques, dégradations, incendies, interactions avec le décor | à venir |
+| 3 | **Moteur de simulation et navigation** : graphe indépendant, groupes logiques et individus simulés à grande échelle (objectif de test 50 000), cortèges / rassemblements statiques / groupes secondaires, transitions causales, déplacements d'unités et de véhicules, temps/pause, **interfaces pour le futur système de sprites** — découpée en **3a/3b (jusqu'à la validation intermédiaire)** puis **3c/3d** | ✅ livrée (3d : `PHASE3_3D.md`) |
+| 4 | **Incidents et lieux d'intérêt (POI)** : POI issus d'OSM + objets de scénario synthétiques, dégradations, incendies, interactions avec le décor | ✅ livrée (`PHASE4.md`) |
 | 5 | **Rendu avancé et comportements** : silhouettes de personnes, densité de foule, comportements individuels, représentation des unités | à venir |
 | 6 | **Interventions et secours** : moyens, blessures, secours, pompiers, conséquences humaines | à venir |
 | 7 | **Missions et évaluation** : scénarios, bac à sable, objectifs, bilans, sauvegardes | à venir |

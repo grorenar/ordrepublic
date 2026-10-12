@@ -52,6 +52,23 @@ export interface Obstacle {
   source: Provenance;
 }
 
+/** Nature d'un lieu d'intérêt (cahier §16.3) ; les installations de police/gendarmerie n'en font jamais partie. */
+export type PoiKind = 'commerce' | 'public' | 'school' | 'company' | 'furniture';
+
+/** Lieu d'intérêt issu des données (OSM) : information géographique, jamais une cible d'incident. */
+export interface GraphPoi {
+  id: string;
+  kind: PoiKind;
+  /** Catégorie fine (valeur d'étiquette OSM : `bakery`, `school`, `waste_basket`…). */
+  category: string;
+  /** Nom OSM éventuel (affiché tel quel, décision v0.4). */
+  name?: string;
+  x: number;
+  y: number;
+  source: Provenance;
+  osmId?: number;
+}
+
 export interface StreetGraph {
   version: 1;
   origin: LngLat;
@@ -74,6 +91,8 @@ export interface StreetGraph {
   adj: Uint32Array; // arêtes incidentes
   spaces: OpenSpace[];
   obstacles: Obstacle[];
+  /** Lieux d'intérêt (commerces, établissements publics, écoles, entreprises, mobilier) : affichage et contexte de rue. */
+  pois: GraphPoi[];
   provenance: { source: Provenance; osmTimestamp?: string; label?: string };
   /** Emprise des nœuds (m). */
   bounds: { minX: number; minY: number; maxX: number; maxY: number };
@@ -97,6 +116,7 @@ export interface RawGraph {
   edges: RawEdge[];
   spaces?: OpenSpace[];
   obstacles?: Obstacle[];
+  pois?: GraphPoi[];
   provenance: StreetGraph['provenance'];
 }
 
@@ -187,6 +207,7 @@ export function buildGraph(raw: RawGraph): StreetGraph {
     adj,
     spaces: raw.spaces ?? [],
     obstacles: raw.obstacles ?? [],
+    pois: raw.pois ?? [],
     provenance: raw.provenance,
     bounds: nodeCount ? { minX, minY, maxX, maxY } : { minX: 0, minY: 0, maxX: 0, maxY: 0 },
   };

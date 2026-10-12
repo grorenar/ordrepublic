@@ -2,6 +2,10 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { EdgeClass, EdgeFlag, connectedComponents } from '../../src/nav/graph';
 import { buildGraphFromOverpassJson } from '../../src/nav/osm/buildGraph';
+import { overpassQuery } from '../../src/nav/osm/packBuild';
+import { packGraph, unpackGraph } from '../../src/nav/pack';
+import { Sim } from '../../src/engine/sim';
+import { overpassGrid } from '../fixtures/overpassGrid';
 import { OsmParseError, parseOverpass } from '../../src/nav/osm/parseOverpass';
 import { classifyHighway, parseWidth } from '../../src/nav/osm/tagsPolicy';
 
@@ -104,5 +108,50 @@ describe('construction du graphe depuis une réponse Overpass (fixture simulée)
     const { graph: g, report: r } = buildGraphFromOverpassJson({ elements: [] });
     expect(g.edgeCount).toBe(0);
     expect(r.warnings.join(' ')).toContain('fond schématique');
+  });
+});
+
+describe('lieux d’intérêt OSM (phase 4)', () => {
+  const center = { lng: 6.1757, lat: 49.1193 };
+  const build = () => buildGraphFromOverpassJson(overpassGrid(center, { pois: true, townhall: true, market: true }), { origin: center }).graph;
+
+  it('commerces, écoles, entreprises et administrations deviennent des lieux d’intérêt avec leur nom ; le mobilier est classé à part', () => {
+    const g = build();
+    const names = g.pois.map((p) => p.name);
+    expect(names).toContain('Boulangerie du Test (fictive)');
+    expect(g.pois.find((p) => p.name === 'Boulangerie du Test (fictive)')).toMatchObject({ kind: 'commerce', category: 'bakery', source: 'osm' });
+    expect(g.pois.find((p) => p.name === 'Café du Test (fictif)')?.kind).toBe('commerce');
+    expect(g.pois.find((p) => p.name === 'École du Test (fictive)')?.kind).toBe('school');
+    expect(g.pois.find((p) => p.name === 'Assurance du Test (fictive)')?.kind).toBe('company');
+    expect(g.pois.find((p) => p.name === 'Hôtel de Ville (fictif)')?.kind).toBe('public');
+    expect(g.pois.find((p) => p.category === 'waste_basket')?.kind).toBe('furniture');
+  });
+
+  it('les installations de police ne sont JAMAIS retenues (aucune cible, aucune catégorisation)', () => {
+    const g = build();
+    expect(g.pois.some((p) => /Commissariat/.test(p.name ?? '') || p.category === 'police')).toBe(false);
+  });
+
+  it('les lieux survivent à l’écriture et à la lecture d’un paquet', () => {
+    const g = build();
+    const { graph } = unpackGraph(JSON.parse(JSON.stringify(packGraph(g, { name: 'T', generatedAt: 'x', license: 'ODbL' } as never))));
+    expect(graph.pois.length).toBe(g.pois.length);
+    expect(graph.pois[0]).toEqual(g.pois[0]);
+  });
+
+  it('un monde construit sur ces données : lieux OSM non fictifs et mobilier OSM en décor, jamais ciblés', () => {
+    const g = build();
+    const sim = new Sim({ graph: g, seed: 1 });
+    const osm = sim.world.pois.filter((p) => p.source === 'osm');
+    expect(osm.length).toBeGreaterThan(4);
+    expect(osm.every((p) => !p.fictional)).toBe(true);
+    expect(sim.world.decor.some((d) => d.source === 'osm' && d.kind === 'bin')).toBe(true);
+  });
+
+  it('la requête Overpass demande les commerces et établissements, sans police', () => {
+    const q = overpassQuery({ south: 49, west: 6, north: 49.01, east: 6.01 });
+    expect(q).toContain('["shop"]');
+    expect(q).toContain('school');
+    expect(q).not.toContain('police');
   });
 });

@@ -2,8 +2,9 @@ import type { GameController } from '../game/controller';
 import type { EntityRef } from '../game/selection';
 import { sameRef } from '../game/selection';
 import { FORCE_CODE, VEHICLE_LABEL } from '../render/GameRenderer';
-import type { CrowdGroup, ForceKind, LogEvent, MoverEntity, UnitStatus } from '../engine/types';
+import type { CrowdGroup, ForceKind, IncidentState, LogEvent, MoverEntity, Poi, PoiState, UnitStatus } from '../engine/types';
 import type { SimSpeed } from '../engine/clock';
+import { DECOR_KIND_LABEL } from '../engine/incidents';
 import type { City } from '../state/types';
 import { clockText, dayPart } from '../game/daylight';
 import type { Vec2 } from '../geo/mercator';
@@ -121,6 +122,11 @@ export function TopBar({ ctrl, cityName, cityId, presetCities, onCity, onToggleS
           <span class="label">Véhicules</span>
           <strong data-testid="counter-vehicles">{st.vehicles}</strong>
         </div>
+        <div class="counter" role="listitem" title={`Incidents fictifs : ${st.incidents.total} au total, ${st.incidents.resolved} terminés, ${st.incidents.fires} incendies ; ${st.incidents.damagedPois} commerces fictifs et ${st.incidents.damagedDecor} objets endommagés ; coût fictif cumulé ${st.incidents.costEur.toLocaleString('fr-FR')} €`}>
+          <span class="label">Incidents</span>
+          <strong data-testid="counter-incidents">{st.incidents.active}</strong>
+          <small data-testid="counter-damage">{st.incidents.costEur.toLocaleString('fr-FR')} € fictifs</small>
+        </div>
       </div>
       <div class="citybar">
         <label class="visually-hidden" for="city-select">
@@ -209,9 +215,25 @@ export function ForcesPanel({ ctrl, onSelect }: ListProps) {
         ))}
         {sim.groups.length === 0 && <li class="muted small">Aucun groupe présent.</li>}
       </ul>
+      <h2>Incidents (fictifs)</h2>
+      <ul class="list" data-testid="incident-list">
+        {sim.incidents.active().map((i) => (
+          <li key={i.id}>
+            <button type="button" class={sel({ type: 'incident', id: i.id }) ? 'sel' : ''} onClick={() => onSelect({ type: 'incident', id: i.id }, false)} data-testid={`row-${i.id}`}>
+              <span class="grow">{i.label}</span>
+              <small>gravité {i.severity}</small>
+            </button>
+          </li>
+        ))}
+        {sim.incidents.active().length === 0 && <li class="muted small">Aucun incident en cours.</li>}
+      </ul>
     </div>
   );
 }
+
+const INCIDENT_STATE_LABEL: Record<IncidentState, string> = { emerging: 'naissant', active: 'actif', escalating: 'en aggravation', contained: 'confiné', resolved: 'terminé', lingering: 'persistant (fumée, ruines)' };
+const POI_STATE_LABEL: Record<PoiState, string> = { intact: 'intact', damaged: 'endommagé', burning: 'en feu', destroyed: 'détruit' };
+const POI_KIND_LABEL: Record<Poi['kind'], string> = { commerce: 'Commerce', public: 'Établissement public', school: 'École', company: 'Entreprise', furniture: 'Mobilier', gathering: 'Espace de rassemblement' };
 
 interface DetailProps {
   ctrl: GameController;
@@ -251,7 +273,7 @@ export function DetailPanel({ ctrl, orderMode, onOrderMode, onCenter, onClose }:
     return (
       <div class="panel" data-testid="detail-panel">
         <h2>Sélection</h2>
-        <p class="muted">Cliquez sur une unité, un véhicule ou un groupe (Maj+clic pour en ajouter). Clic droit sur la carte : ordre de déplacement.</p>
+        <p class="muted">Cliquez sur une unité, un véhicule, un groupe, un incident ou un lieu (Maj+clic pour ajouter des unités). Clic droit sur la carte : ordre de déplacement.</p>
       </div>
     );
   }
@@ -274,6 +296,37 @@ export function DetailPanel({ ctrl, orderMode, onOrderMode, onCenter, onClose }:
       title = movers.length > 1 ? `${movers.length} éléments sélectionnés` : v.callsign;
       rows = [['Type', VEHICLE_LABEL[v.vehicle]], ['Équipage', String(v.crew)], ['Avertisseurs', v.emergency ? 'activés (circulation rapide, sens interdits permis)' : 'coupés (circulation normale)'], ...moverRows(ctrl, v)];
       history = sim.journal.forSubject('vehicle', v.id).slice(-6).map((e) => ({ simTimeMs: e.simTimeMs, text: e.text, why: e.why.note }));
+    }
+  } else if (primary.type === 'incident') {
+    const i = sim.incidents.get(primary.id);
+    if (i) {
+      title = i.label;
+      rows = [
+        ['État', INCIDENT_STATE_LABEL[i.state]],
+        ['Gravité', `${i.severity} / 5`],
+        ['Depuis', clockText(ctrl.dayStartSec + i.startedAtMs / 1000)],
+        ['Coût fictif', `${Math.round(i.costEur).toLocaleString('fr-FR')} €`],
+        ['Cible', `${DECOR_KIND_LABEL[sim.world.item(i.targetDecorId)?.kind ?? 'debris']} (objet de scénario fictif)`],
+      ];
+      if (i.parentId) rows.push(['Propagé depuis', `${sim.incidents.get(i.parentId)?.label ?? i.parentId}`]);
+      if (i.childIds.length) rows.push(['Conséquences', i.childIds.map((c) => sim.incidents.get(c)?.label ?? c).join(' ; ')]);
+      if (i.groupId) rows.push(['Groupe à l’origine', sim.group(i.groupId)?.label ?? i.groupId]);
+      origin = `${i.cause.note} [${i.cause.kind}]`;
+      history = i.history.slice(-8).map((h) => ({ simTimeMs: h.simTimeMs, text: h.text, why: h.why.note }));
+    }
+  } else if (primary.type === 'poi') {
+    const p = sim.world.poi(primary.id);
+    if (p) {
+      title = p.name ?? POI_KIND_LABEL[p.kind];
+      rows = [
+        ['Nature', `${POI_KIND_LABEL[p.kind]}${p.category ? ` (${p.category})` : ''}`],
+        ['Source', p.source === 'osm' ? 'OpenStreetMap (information géographique, jamais une cible)' : 'objet de scénario fictif'],
+        ['État', POI_STATE_LABEL[p.state]],
+        ['Dégâts', `${Math.round(p.damage)} / 100`],
+      ];
+      if (p.streetCategory) rows.push(['Rue', p.streetCategory]);
+      if (p.incidentIds.length) rows.push(['Incidents', p.incidentIds.map((id) => sim.incidents.get(id)?.label ?? id).join(' ; ')]);
+      history = p.incidentIds.flatMap((id) => sim.incidents.get(id)?.history ?? []).slice(-8).map((h) => ({ simTimeMs: h.simTimeMs, text: h.text, why: h.why.note }));
     }
   } else {
     const g = sim.group(primary.id);

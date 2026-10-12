@@ -20,7 +20,7 @@ export interface LogEvent {
   tick: number;
   simTimeMs: number;
   level: 'info' | 'warn' | 'alert';
-  subject?: { type: 'group' | 'unit' | 'vehicle' | 'edge' | 'scenario'; id: Id };
+  subject?: { type: 'group' | 'unit' | 'vehicle' | 'edge' | 'scenario' | 'incident' | 'poi'; id: Id };
   /** Code stable, ex. `group.created`, `group.arrived`, `group.rerouted`. */
   code: string;
   text: string;
@@ -156,6 +156,12 @@ export interface CrowdGroup {
   members: MemberSet;
   cohesion: number;
   tension: number;
+  /** Tension de fond vers laquelle le groupe retombe en l'absence d'incident (modifiée par le scénario). */
+  baseTension: number;
+  /** Jusqu'à cet instant (ms de jeu), le groupe est « affecté » par un incident proche. */
+  affectedUntilMs: number;
+  /** Dernier déclenchement d'un incident par ce groupe (ms de jeu) : délai de réarmement. */
+  lastIncidentMs: number;
   morale: number;
   plan: GroupPlan;
   anchor: Anchor | null;
@@ -331,4 +337,99 @@ export interface Focus {
 
 export interface SimOrigin {
   origin: LngLat;
+}
+
+// --- Monde : décor, lieux d'intérêt, incidents (phase 4) -----------------------------
+/** Objets urbains. Ce sont des DONNÉES (le rendu choisit le sprite) : le moteur ne connaît pas les images. */
+export type DecorKind = 'bin' | 'bench' | 'barrier' | 'cone' | 'container' | 'shopfront' | 'bus_shelter' | 'debris';
+export type DecorState = 'intact' | 'damaged' | 'burning' | 'burnt' | 'destroyed';
+
+export interface DecorItem {
+  id: Id;
+  kind: DecorKind;
+  x: number;
+  y: number;
+  heading: number;
+  state: DecorState;
+  /** `osm` : mobilier cartographié ; `synthetic` : objet de scénario généré de façon déterministe le long des rues. */
+  source: 'osm' | 'synthetic';
+  /** Lieu d'intérêt de rattachement (une vitrine fictive appartient à un commerce fictif). */
+  poiId?: Id;
+  /** Cause de sa présence (génération du monde, fermeture de rue du scénario…). */
+  cause: Cause;
+  /** Incident en cours qui l'affecte. */
+  incidentId?: Id;
+}
+
+export type PoiState = 'intact' | 'damaged' | 'burning' | 'destroyed';
+
+/**
+ * Lieu d'intérêt. `fictional` : objet de scénario synthétique (seule cible possible d'un incident) ; un lieu OSM est
+ * affiché avec son nom mais n'est JAMAIS ciblé ni classé (cahier §16.4).
+ */
+export interface Poi {
+  id: Id;
+  kind: 'commerce' | 'public' | 'school' | 'company' | 'furniture' | 'gathering';
+  category: string;
+  name?: string;
+  x: number;
+  y: number;
+  radius: number;
+  source: Provenance;
+  osmId?: number;
+  fictional: boolean;
+  /** Dégâts cumulés 0..100 (persistants). */
+  damage: number;
+  state: PoiState;
+  decorIds: Id[];
+  incidentIds: Id[];
+  /** Catégorie générale de la rue (ex. « rue commerçante »), seule information tirée d'OSM sur les commerces. */
+  streetCategory?: string;
+}
+
+export type IncidentKind = 'bin_fire' | 'fire' | 'furniture_damage' | 'window_break';
+export type IncidentState = 'emerging' | 'active' | 'escalating' | 'contained' | 'resolved' | 'lingering';
+
+export interface Incident {
+  id: Id;
+  kind: IncidentKind;
+  x: number;
+  y: number;
+  severity: 1 | 2 | 3 | 4 | 5;
+  state: IncidentState;
+  startedAtMs: number;
+  /** Durée naturelle restante du phénomène à partir de `stateSinceMs` (ms). */
+  durationMs: number;
+  stateSinceMs: number;
+  endedAtMs: number | null;
+  targetDecorId: Id;
+  poiId?: Id;
+  /** Libellé explicitement fictif, affiché tel quel. */
+  label: string;
+  /** Cause d'origine (règle de tension d'un groupe, événement de scénario, propagation d'un autre incident). */
+  cause: Cause;
+  /** Incident parent (propagation). */
+  parentId?: Id;
+  /** Incidents et objets engendrés (chaînage explicite). */
+  childIds: Id[];
+  /** Groupe de foule à l'origine (si l'incident vient de la foule). */
+  groupId?: Id;
+  /** Secondes cumulées sans surveillance par une unité (pilote l'escalade). */
+  unattendedS: number;
+  /** Secondes consécutives de présence d'une unité (pilote le confinement). */
+  attendedS: number;
+  /** Coût fictif cumulé (€). */
+  costEur: number;
+  history: HistoryEntry[];
+}
+
+export interface IncidentStats {
+  total: number;
+  active: number;
+  resolved: number;
+  fires: number;
+  byKind: Record<IncidentKind, number>;
+  costEur: number;
+  damagedPois: number;
+  damagedDecor: number;
 }

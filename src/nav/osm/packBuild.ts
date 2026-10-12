@@ -2,6 +2,7 @@ import { LocalFrame, type LngLat } from '../../geo/mercator';
 import { packGraph, type Pack } from '../pack';
 import { buildGraphFromOsm, type BuildReport } from './buildGraph';
 import { parseOverpass } from './parseOverpass';
+import { POI_AMENITY_REGEX } from './tagsPolicy';
 
 /** Emprise par défaut d'un paquet de ville : couvre la plus grande zone de jeu (2 800 × 2 100 m) avec marge. */
 export const PACK_HALF_WIDTH_M = 1700;
@@ -56,6 +57,10 @@ export function overpassQuery(b: Bbox, o: { buildings?: boolean; timeoutS?: numb
     // administrations (mairie, tribunal, bâtiments gouvernementaux) : pour placer un piquet devant une vraie administration
     `way["amenity"~"^(townhall|courthouse)$"](${bb});`,
     `way["office"="government"](${bb});`,
+    // lieux d'intérêt (commerces, écoles, établissements, mobilier) : affichage et contexte de rue, jamais des cibles
+    `nwr["shop"](${bb});`,
+    `nwr["amenity"~"${POI_AMENITY_REGEX}"](${bb});`,
+    `nwr["office"](${bb});`,
   ];
   if (o.buildings !== false) parts.push(`way["building"](${bb});`);
   return `[out:json][timeout:${o.timeoutS ?? 90}];\n(\n  ${parts.join('\n  ')}\n);\n(._;>;);\nout body qt;`;

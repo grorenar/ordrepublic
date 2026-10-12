@@ -4,7 +4,7 @@ import { LocalFrame, type LngLat } from '../../src/geo/mercator';
  * Réponse Overpass SIMULÉE (aucun réseau) : quadrillage de rues autour d'un centre, immeubles dans les îlots,
  * une place. Noms fictifs. Sert aux tests du chargement à la demande (unitaires et navigateur).
  */
-export function overpassGrid(center: LngLat, o: { cols?: number; rows?: number; step?: number; townhall?: boolean; market?: boolean } = {}) {
+export function overpassGrid(center: LngLat, o: { cols?: number; rows?: number; step?: number; townhall?: boolean; market?: boolean; pois?: boolean } = {}) {
   const cols = o.cols ?? 12;
   const rows = o.rows ?? 10;
   const step = o.step ?? 90;
@@ -47,6 +47,20 @@ export function overpassGrid(center: LngLat, o: { cols?: number; rows?: number; 
       if (o.townhall && c === sc - 2 && r === sr + 2) tags = { building: 'yes', amenity: 'townhall', name: 'Hôtel de Ville (fictif)' };
       els.push({ type: 'way', id: wid++, nodes: [...ring, ring[0]], tags });
     }
+  }
+  if (o.pois) {
+    // lieux d'intérêt (noms fictifs) : commerces en nœuds, une école et un commissariat (jamais retenu), une poubelle cartographiée
+    const put = (x: number, y: number, tags: Record<string, string>) => {
+      const p = frame.toLngLat({ x, y });
+      els.push({ type: 'node', id: id++, lat: +p.lat.toFixed(7), lon: +p.lng.toFixed(7), tags });
+    };
+    put(x0 + 40, y0 + 45, { shop: 'bakery', name: 'Boulangerie du Test (fictive)' });
+    put(x0 + 130, y0 + 45, { shop: 'clothes', name: 'Mode du Test (fictive)' });
+    put(x0 + 220, y0 + 45, { amenity: 'cafe', name: 'Café du Test (fictif)' });
+    put(x0 + 310, y0 + 45, { amenity: 'school', name: 'École du Test (fictive)' });
+    put(x0 + 400, y0 + 45, { amenity: 'police', name: 'Commissariat du Test (fictif)' });
+    put(x0 + 40, y0 + 135, { amenity: 'waste_basket' });
+    put(x0 + 130, y0 + 135, { office: 'insurance', name: 'Assurance du Test (fictive)' });
   }
   return { version: 0.6, generator: 'simulation de test', osm3s: { timestamp_osm_base: '2000-01-01T00:00:00Z' }, elements: els };
 }

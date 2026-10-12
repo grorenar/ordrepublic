@@ -189,6 +189,11 @@ export function buildDemoScenario(graph: StreetGraph, opts: { cortegeSize?: numb
     label: 'Cortège',
     reason: `heure de départ du cortège atteinte : il part de ${plaza.label} vers ${admin.label}`,
   });
+  // ambiance du cortège : le scénario règle la tension ; les incidents en découlent par les règles du moteur
+  timeline.push({ id: 'ev-tension-depart', atMs: ms(departS), kind: 'set_tension', groupKey: 'rassemblement', tension: 28, reason: 'le cortège s’ébranle : tension modérée' });
+  timeline.push({ id: 'ev-tension-hausse', atMs: ms(departS + marchS * 0.3), kind: 'set_tension', groupKey: 'rassemblement', tension: 68, reason: 'montée de tension au sein du cortège (scénario fictif)' });
+  timeline.push({ id: 'ev-tension-baisse', atMs: ms(departS + marchS * 0.75), kind: 'set_tension', groupKey: 'rassemblement', tension: 25, reason: 'apaisement à l’approche de la destination (scénario fictif)' });
+  timeline.push({ id: 'ev-feu-piquet', atMs: ms(arrivalS + 120), kind: 'spawn_incident', incident: 'bin_fire', x: admin.pos.x, y: admin.pos.y, reason: `départ de feu de poubelle prévu au scénario près de ${admin.label} (fictif)` });
   if (closeEdge !== null) {
     timeline.push({ id: 'ev-travaux', atMs: ms(departS + marchS * 0.3), kind: 'close_street', edgeId: closeEdge, reason: 'travaux de voirie fictifs : rue fermée par le scénario' });
     timeline.push({ id: 'ev-fin-travaux', atMs: ms(departS + marchS * 0.75), kind: 'open_street', edgeId: closeEdge, reason: 'fin des travaux fictifs : rue rouverte' });

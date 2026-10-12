@@ -7,7 +7,7 @@ import { lodForZoom, type Lod } from './lod';
 import { defaultManifest, forceSpriteId, ManifestIndex, PERSON_COLORS, vehicleSpriteId, VEHICLE_DIMENSIONS } from './sprites/manifest';
 import { ProceduralSpriteProvider } from './sprites/procedural';
 import { MARKERS, ringMarker, STATUS_MARKERS, statusMarker } from './sprites/markers';
-import { buildSnapshot, crowdPose, orientationIndex, type RenderablePose, type RenderableSnapshot, type RenderableUnit, type RenderableVehicle } from './sprites/snapshot';
+import { buildSnapshot, crowdPose, decorSpriteFor, orientationIndex, type RenderablePose, type RenderableSnapshot, type RenderableUnit, type RenderableVehicle } from './sprites/snapshot';
 import type { SpriteProvider, SpriteQuery, SpriteRegion } from './sprites/types';
 
 const COLORS = {
@@ -296,8 +296,11 @@ export class GameRenderer {
     if (on('crowd')) this.drawCrowds(c, alpha, lod, t);
     const snap = buildSnapshot(c, alpha, t);
     this.snapshot = snap;
+    if (on('decor')) this.drawDecor(c, t, lod);
+    if (on('pois')) this.drawPois(c, lod);
     if (on('vehicles')) for (const v of snap.vehicles) this.drawVehicle(c, v, t, lod);
     if (on('units')) for (const u of snap.units) this.drawUnit(c, u, t, lod);
+    if (on('incidents')) this.drawIncidents(c, snap, t, lod);
   }
 
   // -- zone, rues ---------------------------------------------------------
@@ -629,6 +632,149 @@ export class GameRenderer {
     ctx.lineWidth = 1.6;
     ctx.stroke();
     ctx.restore();
+  }
+
+  // -- monde : décor, lieux d'intérêt, incidents ---------------------------
+
+  /** Objets urbains (poubelles, bancs, barrières, vitrines fictives…) : sprites, dès que l'échelle les rend lisibles. */
+  private drawDecor(c: GameController, t: number, lod: Lod): void {
+    if (this.ppm < 2.2) return;
+    const { ctx } = this;
+    const q: SpriteQuery = { id: '', variant: 0, orientation: 0, frame: 0, tier: lod.tier >= 3 ? 3 : 2, ppm: this.ppm, deferred: true };
+    const burnFrame = Math.floor(t * 4) & 1;
+    const W = this.cssW + 40;
+    const H = this.cssH + 40;
+    for (const d of c.sim.world.decor) {
+      const sx = this.cx + (d.x - this.mx) * this.ppm;
+      const sy = this.cy - (d.y - this.my) * this.ppm;
+      if (sx < -40 || sy < -40 || sx > W || sy > H) continue;
+      q.id = decorSpriteFor(d.kind, d.state);
+      q.frame = d.state === 'burning' ? burnFrame : 0;
+      const r = this.sprites.get(q);
+      if (!r) continue;
+      this.blit(r, sx, sy, -d.heading);
+    }
+  }
+
+  private static readonly POI_COLORS: Record<string, string> = { commerce: '#fbbf24', public: '#a78bfa', school: '#34d399', company: '#94a3b8', gathering: '#38bdf8' };
+
+  /** Lieux d'intérêt : épingles discrètes ; le nom OSM s'affiche tel quel, un commerce fictif est marqué comme tel. */
+  private drawPois(c: GameController, lod: Lod): void {
+    if (!lod.labels) return;
+    const { ctx } = this;
+    const hovered = this.hover?.type === 'poi' ? this.hover.id : null;
+    let labels = 0;
+    for (const p of c.sim.world.pois) {
+      if (p.kind === 'gathering') continue;
+      const sx = this.cx + (p.x - this.mx) * this.ppm;
+      const sy = this.cy - (p.y - this.my) * this.ppm;
+      if (sx < -20 || sy < -20 || sx > this.cssW + 20 || sy > this.cssH + 20) continue;
+      const selected = c.selection.some((r) => r.type === 'poi' && r.id === p.id);
+      this.targets.push({ ref: { type: 'poi', id: p.id }, x: sx, y: sy });
+      if (p.fictional && !selected && hovered !== p.id && p.state === 'intact') continue; // la vitrine fictive est déjà dessinée
+      const col = GameRenderer.POI_COLORS[p.kind] ?? '#cbd5e1';
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(sx, sy - 5);
+      ctx.lineTo(sx + 4, sy);
+      ctx.lineTo(sx, sy + 5);
+      ctx.lineTo(sx - 4, sy);
+      ctx.closePath();
+      ctx.fillStyle = p.state === 'destroyed' ? '#64748b' : p.state === 'burning' ? '#ff5a4d' : p.state === 'damaged' ? '#fb923c' : col;
+      ctx.globalAlpha = 0.95;
+      ctx.fill();
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = 'rgba(8,12,20,0.85)';
+      ctx.stroke();
+      ctx.restore();
+      if (selected) this.ring({ x: sx, y: sy }, 11, COLORS.accent, 0);
+      const showName = p.name && (selected || hovered === p.id || (this.ppm >= 4.5 && labels < 18));
+      if (showName) {
+        labels++;
+        this.pill(p.name as string, sx, sy - 14, { size: 10, bg: COLORS.pill, border: col });
+      }
+    }
+  }
+
+  /** Incidents : fumée et flammes procédurales (effets de la phase 5 à venir), épingle d'alerte, étiquette « fictif ». */
+  private drawIncidents(c: GameController, snap: RenderableSnapshot, t: number, lod: Lod): void {
+    const { ctx } = this;
+    for (const i of snap.incidents) {
+      const sx = this.cx + (i.x - this.mx) * this.ppm;
+      const sy = this.cy - (i.y - this.my) * this.ppm;
+      if (sx < -60 || sy < -60 || sx > this.cssW + 60 || sy > this.cssH + 60) continue;
+      const ref: EntityRef = { type: 'incident', id: i.id };
+      const selected = c.isSelected(ref);
+      this.targets.push({ ref, x: sx, y: sy });
+      const fire = i.kind === 'bin_fire' || i.kind === 'fire';
+      // fumée : cercles translucides qui montent (écran), plus denses selon la gravité
+      if (fire && (i.state === 'active' || i.state === 'escalating' || i.state === 'lingering' || i.state === 'contained') && this.ppm >= 1.2) {
+        const dense = i.state === 'lingering' ? 0.35 : 1;
+        const puffs = 3 + i.severity;
+        ctx.save();
+        for (let k = 0; k < puffs; k++) {
+          const ph = ((t * 0.35 * this.motion + k / puffs) % 1 + 1) % 1;
+          const r = (1.2 + i.severity * 0.5 + ph * 2.2) * this.ppm;
+          ctx.globalAlpha = (1 - ph) * 0.5 * dense;
+          ctx.fillStyle = '#3b3f46';
+          ctx.beginPath();
+          ctx.arc(sx + Math.sin(k * 2.1 + t * 0.4) * 0.8 * this.ppm, sy - ph * 3.5 * this.ppm, Math.min(r, 60), 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+      // lueur du feu : visible même quand l'objet est minuscule à l'écran
+      if (fire && (i.state === 'active' || i.state === 'escalating')) {
+        const gr = Math.max(9, (1.6 + 0.5 * i.severity) * this.ppm);
+        const grad = ctx.createRadialGradient(sx, sy, 0, sx, sy, gr);
+        const flick = this.motion ? 0.75 + 0.25 * Math.sin(t * 11 + i.severity) : 1;
+        grad.addColorStop(0, `rgba(255,190,60,${0.85 * flick})`);
+        grad.addColorStop(0.5, `rgba(255,90,40,${0.4 * flick})`);
+        grad.addColorStop(1, 'rgba(255,60,30,0)');
+        ctx.save();
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(sx, sy, gr, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+      // épingle d'alerte (toujours visible, y compris aux faibles zooms)
+      const col = i.state === 'contained' ? '#fbbf24' : i.state === 'lingering' ? '#94a3b8' : '#ff5a4d';
+      const pulse = this.motion ? 1 + 0.12 * Math.sin(t * 5) : 1;
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(sx, sy - 12, 8 * pulse, 0, Math.PI * 2);
+      ctx.fillStyle = col;
+      ctx.fill();
+      ctx.lineWidth = 1.6;
+      ctx.strokeStyle = 'rgba(8,12,20,0.9)';
+      ctx.stroke();
+      ctx.fillStyle = '#0b1220';
+      ctx.font = '700 11px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('!', sx, sy - 11.5);
+      ctx.restore();
+      ringMarker(ctx, sx, sy, Math.max(10, 2.2 * this.ppm), MARKERS.incident, t, this.motion);
+      if (selected) this.ring({ x: sx, y: sy }, Math.max(16, 3 * this.ppm), COLORS.accent, t);
+      if (lod.labels || selected) this.pill(`${i.label} · gravité ${i.severity}`, sx, sy - 30, { size: 10, bg: 'rgba(60,10,10,0.92)', border: col });
+    }
+    // groupes affectés par un incident : liseré orangé pulsé
+    const now = c.sim.timeMs;
+    for (const g of c.sim.groups) {
+      if (g.affectedUntilMs <= now || g.phase === 'dispersed') continue;
+      const box = groupBox(g, 0);
+      if (!box) continue;
+      const a = this.toScreen({ x: box.minX, y: box.maxY });
+      const b = this.toScreen({ x: box.maxX, y: box.minY });
+      ctx.save();
+      ctx.strokeStyle = '#fb923c';
+      ctx.globalAlpha = 0.5 + (this.motion ? 0.3 * Math.sin(t * 6) : 0);
+      ctx.lineWidth = 2;
+      ctx.setLineDash([3, 4]);
+      ctx.strokeRect(a.x - 6, a.y - 6, b.x - a.x + 12, b.y - a.y + 12);
+      ctx.restore();
+    }
   }
 
   // -- forces -------------------------------------------------------------

@@ -1,4 +1,4 @@
-import type { Tags } from './tagsPolicy';
+import { classifyPoi, type Tags } from './tagsPolicy';
 
 export interface OsmNode {
   lat: number;
@@ -9,8 +9,16 @@ export interface OsmWay {
   nodes: number[];
   tags: Tags;
 }
+export interface OsmTaggedNode {
+  id: number;
+  lat: number;
+  lon: number;
+  tags: Tags;
+}
 export interface OsmData {
   nodes: Map<number, OsmNode>;
+  /** Points d'intérêt (étiquettes de commerce, établissement, mobilier…) : seuls les nœuds utiles sont conservés. */
+  poiNodes: OsmTaggedNode[];
   ways: OsmWay[];
   /** Éléments ignorés (relations, etc.) : les multipolygones ne sont pas gérés en phase 3. */
   skipped: { relations: number };
@@ -28,12 +36,18 @@ export function parseOverpass(json: unknown): OsmData {
   }
   const nodes = new Map<number, OsmNode>();
   const ways: OsmWay[] = [];
+  const poiNodes: OsmTaggedNode[] = [];
   let relations = 0;
   for (const el of (json as { elements: unknown[] }).elements) {
     if (!el || typeof el !== 'object') continue;
     const e = el as Record<string, unknown>;
     if (e.type === 'node' && typeof e.id === 'number' && typeof e.lat === 'number' && typeof e.lon === 'number') {
       nodes.set(e.id, { lat: e.lat, lon: e.lon });
+      if (e.tags && typeof e.tags === 'object') {
+        const tg: Tags = {};
+        for (const [k, v] of Object.entries(e.tags as Record<string, unknown>)) if (typeof v === 'string') tg[k] = v;
+        if (classifyPoi(tg)) poiNodes.push({ id: e.id, lat: e.lat, lon: e.lon, tags: tg });
+      }
     } else if (e.type === 'way' && typeof e.id === 'number' && Array.isArray(e.nodes)) {
       const ids = (e.nodes as unknown[]).filter((n): n is number => typeof n === 'number');
       if (Array.isArray(e.geometry) && e.geometry.length === ids.length) {
@@ -48,5 +62,5 @@ export function parseOverpass(json: unknown): OsmData {
       ways.push({ id: e.id, nodes: ids, tags });
     } else if (e.type === 'relation') relations++;
   }
-  return { nodes, ways, skipped: { relations } };
+  return { nodes, poiNodes, ways, skipped: { relations } };
 }

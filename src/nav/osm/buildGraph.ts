@@ -2,13 +2,14 @@ import { LocalFrame, type LngLat, type Vec2 } from '../../geo/mercator';
 import {
   buildGraph,
   connectedComponents,
+  type GraphPoi,
   type Obstacle,
   type OpenSpace,
   type RawEdge,
   type StreetGraph,
 } from '../graph';
 import { parseOverpass, type OsmData } from './parseOverpass';
-import { classifyHighway, classifySpace, isAdministration, isBuilding, type ExclusionReason } from './tagsPolicy';
+import { classifyHighway, classifyPoi, classifySpace, isAdministration, isBuilding, type ExclusionReason } from './tagsPolicy';
 
 export interface BuildOptions {
   /** Origine du repère local ; par défaut le centroïde des nœuds utilisés. */
@@ -129,6 +130,7 @@ export function buildGraphFromOsm(data: OsmData, opts: BuildOptions = {}): { gra
   // espaces et obstacles
   const spaces: OpenSpace[] = [];
   const obstacles: Obstacle[] = [];
+  const pois: GraphPoi[] = [];
   for (const w of data.ways) {
     if (w.nodes.length < 4 || w.nodes[0] !== w.nodes[w.nodes.length - 1]) continue;
     const ids = w.nodes.slice(0, -1).filter((n) => data.nodes.has(n));
@@ -139,9 +141,26 @@ export function buildGraphFromOsm(data: OsmData, opts: BuildOptions = {}): { gra
       ring[2 * i] = p.x;
       ring[2 * i + 1] = p.y;
     });
+    const poi = classifyPoi(w.tags);
+    if (poi) {
+      let cx = 0;
+      let cy = 0;
+      for (let i = 0; i < ids.length; i++) {
+        cx += ring[2 * i] as number;
+        cy += ring[2 * i + 1] as number;
+      }
+      pois.push({ id: `osm-w${w.id}`, kind: poi.kind, category: poi.category, name: w.tags.name, x: cx / ids.length, y: cy / ids.length, source: 'osm', osmId: w.id });
+    }
     const kind = classifySpace(w.tags);
     if (kind) spaces.push({ id: `osm-w${w.id}`, kind, ring, name: w.tags.name, source: 'osm', osmId: w.id });
     else if (isBuilding(w.tags)) obstacles.push({ ring, name: w.tags.name, source: 'osm', ...(isAdministration(w.tags) ? { kind: 'administration' as const } : {}) });
+  }
+
+  for (const n of data.poiNodes) {
+    const poi = classifyPoi(n.tags);
+    if (!poi) continue;
+    const p = frame.toMeters({ lat: n.lat, lng: n.lon });
+    pois.push({ id: `osm-n${n.id}`, kind: poi.kind, category: poi.category, name: n.tags.name, x: p.x, y: p.y, source: 'osm', osmId: n.id });
   }
 
   let graph = buildGraph({
@@ -150,6 +169,7 @@ export function buildGraphFromOsm(data: OsmData, opts: BuildOptions = {}): { gra
     edges,
     spaces,
     obstacles,
+    pois,
     provenance: { source: 'osm', osmTimestamp: opts.osmTimestamp, label: opts.label },
   });
 
@@ -178,7 +198,7 @@ export function buildGraphFromOsm(data: OsmData, opts: BuildOptions = {}): { gra
       };
       return { ...e, a: m(e.a), b: m(e.b) };
     });
-    graph = buildGraph({ origin, nodes: nn, edges: re, spaces, obstacles, provenance: graph.provenance });
+    graph = buildGraph({ origin, nodes: nn, edges: re, spaces, obstacles, pois, provenance: graph.provenance });
   }
 
   let lengthM = 0;

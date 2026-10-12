@@ -3,11 +3,13 @@ import { PointGrid } from '../engine/spatialIndex';
 import type { Sim } from '../engine/sim';
 import type { CrowdGroup, Id, MoverEntity } from '../engine/types';
 
-/** Élément sélectionnable : unité, véhicule, groupe de manifestants (et éventuellement un individu précis). */
+/** Élément sélectionnable : unité, véhicule, groupe de manifestants (et éventuellement un individu précis), incident, lieu d'intérêt. */
 export type EntityRef =
   | { type: 'unit'; id: Id }
   | { type: 'vehicle'; id: Id }
-  | { type: 'group'; id: Id; member?: number };
+  | { type: 'group'; id: Id; member?: number }
+  | { type: 'incident'; id: Id }
+  | { type: 'poi'; id: Id };
 
 export const sameRef = (a: EntityRef | null, b: EntityRef | null): boolean => !!a && !!b && a.type === b.type && a.id === b.id;
 
@@ -99,6 +101,25 @@ export class SelectionIndex {
       if (d <= Math.max(tolM, this.hitRadius(v)) && d < bestD) {
         bestD = d;
         best = { type: 'vehicle', id: v.id };
+      }
+    }
+    if (best) return best;
+    // incidents en cours (leur épicentre), puis lieux d'intérêt (nom OSM ou commerce fictif)
+    for (const i of sim.incidents.incidents) {
+      if (i.state === 'resolved') continue;
+      const d = Math.hypot(i.x - p.x, i.y - p.y);
+      if (d <= Math.max(tolM, 4) && d < bestD) {
+        bestD = d;
+        best = { type: 'incident', id: i.id };
+      }
+    }
+    if (best) return best;
+    for (const poi of sim.world.pois) {
+      if (poi.kind === 'gathering') continue;
+      const d = Math.hypot(poi.x - p.x, poi.y - p.y);
+      if (d <= Math.max(tolM, Math.min(poi.radius, 8)) && d < bestD) {
+        bestD = d;
+        best = { type: 'poi', id: poi.id };
       }
     }
     if (best) return best;

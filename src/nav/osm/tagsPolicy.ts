@@ -123,3 +123,32 @@ export function isAdministration(tags: Tags): boolean {
 export function isBuilding(tags: Tags): boolean {
   return (!!tags.building && tags.building !== 'no') || isAdministration(tags);
 }
+
+const COMMERCE_AMENITIES = new Set(['restaurant', 'cafe', 'bar', 'fast_food', 'pub', 'bank', 'pharmacy', 'marketplace']);
+const SCHOOL_AMENITIES = new Set(['school', 'kindergarten', 'college', 'university']);
+const PUBLIC_AMENITIES = new Set(['townhall', 'courthouse', 'post_office', 'library', 'community_centre']);
+const FURNITURE_AMENITIES = new Set(['waste_basket', 'bench']);
+
+/** Pour la requête Overpass : valeurs d'`amenity` d'intérêt (jamais la police ni la gendarmerie). */
+export const POI_AMENITY_REGEX = '^(restaurant|cafe|bar|fast_food|pub|bank|pharmacy|marketplace|school|kindergarten|college|university|townhall|courthouse|post_office|library|community_centre|waste_basket|bench)$';
+
+export interface PoiClass {
+  kind: 'commerce' | 'public' | 'school' | 'company' | 'furniture';
+  category: string;
+}
+
+/**
+ * Lieu d'intérêt d'après les étiquettes OSM (cahier §16.2). Les installations de police et de gendarmerie ne sont
+ * JAMAIS retenues (aucune cible, aucune catégorisation).
+ */
+export function classifyPoi(tags: Tags): PoiClass | null {
+  if (tags.amenity === 'police' || tags.amenity === 'gendarmerie' || tags.office === 'police') return null;
+  const am = tags.amenity;
+  if (am && FURNITURE_AMENITIES.has(am)) return { kind: 'furniture', category: am };
+  if (isAdministration(tags) || (am && PUBLIC_AMENITIES.has(am))) return { kind: 'public', category: am ?? tags.office ?? tags.government ?? 'administration' };
+  if (am && SCHOOL_AMENITIES.has(am)) return { kind: 'school', category: am };
+  if (tags.shop && tags.shop !== 'no') return { kind: 'commerce', category: tags.shop };
+  if (am && COMMERCE_AMENITIES.has(am)) return { kind: 'commerce', category: am };
+  if (tags.office) return { kind: 'company', category: tags.office };
+  return null;
+}

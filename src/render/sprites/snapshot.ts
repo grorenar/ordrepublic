@@ -1,5 +1,5 @@
 import type { GameController } from '../../game/controller';
-import type { CrowdGroup, ForceKind, Loadout, UnitStatus, VehicleKind } from '../../engine/types';
+import type { CrowdGroup, DecorKind, DecorState, ForceKind, IncidentKind, IncidentState, Loadout, UnitStatus, VehicleKind } from '../../engine/types';
 import { forceSpriteId, PERSON_COLORS, PERSON_VARIANTS, vehicleSpriteId } from './manifest';
 
 /**
@@ -44,6 +44,42 @@ export interface RenderablePose {
   seed: number;
 }
 
+export interface RenderableIncident {
+  id: string;
+  kind: IncidentKind;
+  state: IncidentState;
+  severity: number;
+  x: number;
+  y: number;
+  label: string;
+}
+
+/**
+ * Sprite d'un objet de décor selon sa nature et son état (donnée sémantique → identifiant). Remplaçable sans toucher
+ * au moteur : seul ce tableau de correspondance connaît les noms de sprites.
+ */
+export function decorSpriteFor(kind: DecorKind, state: DecorState): string {
+  const burnt = state === 'burnt' || state === 'destroyed';
+  switch (kind) {
+    case 'bin':
+      return state === 'burning' ? 'decor.bin_fire' : burnt ? 'decor.debris' : 'decor.bin';
+    case 'container':
+      return state === 'burning' ? 'decor.container_fire' : state === 'destroyed' ? 'decor.rubble' : burnt ? 'decor.debris' : 'decor.container';
+    case 'shopfront':
+      return burnt ? 'decor.rubble' : state === 'damaged' || state === 'burning' ? 'decor.shopfront_broken' : 'decor.shopfront';
+    case 'bus_shelter':
+      return burnt ? 'decor.debris' : state === 'damaged' || state === 'burning' ? 'decor.bus_shelter_broken' : 'decor.bus_shelter';
+    case 'bench':
+      return burnt || state === 'damaged' ? 'decor.debris' : 'decor.bench';
+    case 'barrier':
+      return state === 'destroyed' ? 'decor.debris' : 'decor.barrier';
+    case 'cone':
+      return 'decor.cone';
+    default:
+      return 'decor.debris';
+  }
+}
+
 export interface RenderableSnapshot {
   tick: number;
   alpha: number;
@@ -51,6 +87,7 @@ export interface RenderableSnapshot {
   timeSec: number;
   units: RenderableUnit[];
   vehicles: RenderableVehicle[];
+  incidents: RenderableIncident[];
 }
 
 const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
@@ -86,7 +123,8 @@ export function buildSnapshot(c: GameController, alpha: number, timeSec: number)
     emergency: v.emergency,
     crew: v.crew,
   }));
-  return { tick: sim.tick, alpha, timeSec, units, vehicles };
+  const incidents: RenderableIncident[] = sim.incidents.incidents.filter((i) => i.state !== 'resolved').map((i) => ({ id: i.id, kind: i.kind, state: i.state, severity: i.severity, x: i.x, y: i.y, label: i.label }));
+  return { tick: sim.tick, alpha, timeSec, units, vehicles, incidents };
 }
 
 /**

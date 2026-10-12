@@ -3,7 +3,7 @@
 Jeu solo en navigateur. **Entièrement fictif** : événements, unités, incidents et identifiants sont simulés.
 Cahier des charges : [`docs/CAHIER_DES_CHARGES.md`](docs/CAHIER_DES_CHARGES.md).
 
-**État : phase 3d terminée (architecture de sprites) ; phase 4 (incidents et lieux d'intérêt) en cours.**
+**État : phases 3d (architecture de sprites) et 4 (incidents et lieux d'intérêt) terminées — en attente de validation avant la phase 5.**
 L'interface lit l'état du **vrai moteur** (`src/engine`, `src/nav`) : vitesses et états réels, journal causal « Pourquoi ? », ordres.
 Aucune donnée de démonstration de la phase 2 ne subsiste. Rapports : [`docs/PHASE3_3C.md`](docs/PHASE3_3C.md) (3c),
 [`docs/PHASE3_MIDPOINT.md`](docs/PHASE3_MIDPOINT.md) (mi-phase) · plan : [`docs/PHASE3_PLAN.md`](docs/PHASE3_PLAN.md) ·

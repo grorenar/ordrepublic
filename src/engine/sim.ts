@@ -26,6 +26,8 @@ import { columnS, computeTargets, evaluateNow, frameEntry, goneCount, routeFrame
 import { withParams, type DeepPartial, type SimParams } from './params';
 import { validateSimParams } from './paramDocs';
 import { Rng, hash32 } from './rng';
+import { IncidentSystem } from './incidents';
+import { buildWorld, type World } from './world';
 import type {
   Anchor,
   Cause,
@@ -59,6 +61,10 @@ export type ScenarioEvent =
   /** Le rassemblement `groupKey` (installé) se met en marche vers `destination` : chacun part de sa place, la tête en premier. */
   | { id: Id; atMs: number; kind: 'begin_march'; groupKey: string; destination: Anchor; onArrival?: 'settle' | 'join_target' | 'leave'; joinTargetKey?: string; label?: string; reason: string }
   /** Le rassemblement `groupKey` se disperse en plusieurs colonnes, chacune vers une sortie différente (parts en fraction de l'effectif). */
+  /** Fixe la tension de fond d'un groupe (le scénario scénarise l'ambiance ; les incidents en découlent par règles). */
+  | { id: Id; atMs: number; kind: 'set_tension'; groupKey: string; tension: number; reason: string }
+  /** Déclenche un incident sur l'objet synthétique compatible le plus proche de (x, y). */
+  | { id: Id; atMs: number; kind: 'spawn_incident'; incident: import('./types').IncidentKind; x: number; y: number; reason: string }
   | { id: Id; atMs: number; kind: 'disperse_sectors'; groupKey: string; exits: Array<{ anchor: Anchor; share: number }>; reason: string; whenSettled?: boolean };
 
 export interface SplitChild {
@@ -97,6 +103,9 @@ export class Sim {
   /** Avertissements de cohérence des paramètres (non bloquants), à afficher dans les réglages/diagnostics. */
   readonly paramWarnings: string[];
   readonly journal = new Journal();
+  /** Décor et lieux d'intérêt (phase 4) ; modifiés seulement par les incidents et le scénario. */
+  readonly world: World;
+  readonly incidents: IncidentSystem;
   readonly groups: CrowdGroup[] = [];
   readonly units: UnitEntity[] = [];
   readonly vehicles: VehicleEntity[] = [];
@@ -138,6 +147,17 @@ export class Sim {
     this.state.walkRight.set(cor.right);
     this.mask?.buildWalkable(o.graph, cor.left, cor.right);
     this.rng = new Rng(hash32(this.seed, 0xabcdef));
+    this.world = buildWorld(o.graph, this.state, this.mask, this.params, this.seed);
+    this.incidents = new IncidentSystem({
+      world: this.world,
+      params: this.params,
+      seed: this.seed,
+      groups: this.groups,
+      units: this.units,
+      timeMs: () => this.timeMs,
+      tick: () => this.tick,
+      log: (level, code, text, why, subject, data) => this.log(level, code, text, why, subject, data),
+    });
     this.timeline = [...(o.timeline ?? [])].sort((a, b) => a.atMs - b.atMs || (a.id < b.id ? -1 : 1));
     this.zone = o.zone;
     this.paramWarnings = issues.warnings;
@@ -334,6 +354,9 @@ export class Sim {
       members,
       cohesion: spec.cohesion ?? 80,
       tension: spec.tension ?? 20,
+      baseTension: spec.tension ?? 20,
+      affectedUntilMs: 0,
+      lastIncidentMs: -1e12,
       morale: 70,
       plan,
       anchor: null,
@@ -509,7 +532,8 @@ export class Sim {
     if (setScenarioBlock(this.state, edgeId, true)) {
       this.closedBy.set(edgeId, cause);
       const name = this.graph.edgeName[edgeId] ?? `tronçon ${edgeId}`;
-      this.log('warn', 'edge.closed', `${name} fermée.`, cause, { type: 'edge', id: String(edgeId) });
+      const n = this.world.placeBarriers(this.graph, edgeId, this.graph.edgeWidth[edgeId] as number, cause);
+      this.log('warn', 'edge.closed', `${name} fermée${n ? ` (${n} barrières et cônes posés)` : ''}.`, cause, { type: 'edge', id: String(edgeId) });
     }
   }
 
@@ -517,8 +541,20 @@ export class Sim {
     if (setScenarioBlock(this.state, edgeId, false)) {
       this.closedBy.delete(edgeId);
       const name = this.graph.edgeName[edgeId] ?? `tronçon ${edgeId}`;
+      this.world.removeBarriers(edgeId);
       this.log('info', 'edge.opened', `${name} rouverte.`, cause, { type: 'edge', id: String(edgeId) });
     }
+  }
+
+  /** Fixe la tension (0–100) d'un groupe et sa valeur de fond : le groupe y reste jusqu'au prochain changement. */
+  setTension(groupId: Id, tension: number, cause: Cause): void {
+    const g = this.group(groupId);
+    if (!g) return;
+    const t = Math.max(0, Math.min(100, tension));
+    const before = g.tension;
+    g.tension = t;
+    g.baseTension = t;
+    this.log(t > before ? 'warn' : 'info', 'group.tension', `${g.label} : tension ${Math.round(before)} → ${Math.round(t)}.`, cause, { type: 'group', id: g.id }, { from: Math.round(before), to: Math.round(t) });
   }
 
   /** Dispersion progressive d'un rassemblement statique vers une sortie (transition T8). */
@@ -739,6 +775,7 @@ export class Sim {
     this.chooseLevels();
     const ctx = this.motionCtx();
     for (const g of this.groups) updateMembers(g, ctx);
+    this.incidents.step();
     const t1 = performance.now();
     // retire les groupes dissous (après journalisation)
     for (let i = this.groups.length - 1; i >= 0; i--) if (this.groups[i]!.phase === 'dispersed' && this.groups[i]!.members.n === this.groups[i]!.members.activeStart) this.groups.splice(i, 1);
@@ -777,6 +814,14 @@ export class Sim {
           break;
         case 'close_street':
           this.closeStreet(ev.edgeId, cause);
+          break;
+        case 'set_tension': {
+          const g = this.groupByKey(ev.groupKey);
+          if (g) this.setTension(g.id, ev.tension, cause);
+          break;
+        }
+        case 'spawn_incident':
+          this.incidents.spawnNear(ev.incident, ev.x, ev.y, cause);
           break;
         case 'open_street':
           this.openStreet(ev.edgeId, cause);

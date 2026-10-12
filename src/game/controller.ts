@@ -3,7 +3,7 @@ import { SimClock, type SimSpeed } from '../engine/clock';
 import { Sim } from '../engine/sim';
 import type { SimParams } from '../engine/params';
 import type { DeepPartial } from '../engine/params';
-import type { Cause, CrowdGroup, Focus, Id, LogEvent, MoverEntity, OrderResult } from '../engine/types';
+import type { Cause, CrowdGroup, Focus, Id, IncidentStats, LogEvent, MoverEntity, OrderResult } from '../engine/types';
 import type { StreetGraph } from '../nav/graph';
 import { buildDemoScenario, type DemoScenario } from '../scenarios/demoScenario';
 import { SelectionIndex, sameRef, type EntityRef } from './selection';
@@ -25,6 +25,8 @@ export interface GameStats {
   vehicles: number;
   streets: { total: number; blocked: number; partial: number; slowed: number; scenarioClosed: number };
   simTimeMs: number;
+  /** Incidents (phase 4) : lus depuis l'état du moteur. */
+  incidents: IncidentStats;
 }
 
 const orderCause = (note: string): Cause => ({ kind: 'player_order', refId: 'joueur', note });
@@ -148,6 +150,7 @@ export class GameController {
     const out: MoverEntity[] = [];
     for (const r of this.selection) {
       if (r.type === 'group') continue;
+      if (r.type === 'incident' || r.type === 'poi') continue;
       const e = this.sim.entity(r.id);
       if (e) out.push(e);
     }
@@ -198,7 +201,7 @@ export class GameController {
     const s = this.sim;
     let forces = 0;
     for (const u of s.units) forces += u.headcount;
-    return { people: s.totalPeople(), forces, units: s.units.length, vehicles: s.vehicles.length, streets: s.streetCounts(), simTimeMs: s.timeMs };
+    return { people: s.totalPeople(), forces, units: s.units.length, vehicles: s.vehicles.length, streets: s.streetCounts(), simTimeMs: s.timeMs, incidents: s.incidents.stats() };
   }
 
   group(id: Id): CrowdGroup | undefined {
@@ -216,6 +219,14 @@ export class GameController {
       if (n <= 0) return null;
       const i = lo + Math.floor(n / 2);
       return { x: m.x[i] as number, y: m.y[i] as number };
+    }
+    if (ref.type === 'incident') {
+      const i = this.sim.incidents.get(ref.id);
+      return i ? { x: i.x, y: i.y } : null;
+    }
+    if (ref.type === 'poi') {
+      const p = this.sim.world.poi(ref.id);
+      return p ? { x: p.x, y: p.y } : null;
     }
     const e = this.sim.entity(ref.id);
     return e ? { x: e.x, y: e.y } : null;
