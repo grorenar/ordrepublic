@@ -61,7 +61,14 @@ export interface SimParams {
   units: {
     /** Vitesse de déplacement maximale (m/s). */
     footSpeedMps: number;
+    /** Plafond de vitesse d'un véhicule (m/s) ; la limite de la classe de voie s'applique en dessous (nav.speedVehicleByClass). */
     vehicleSpeedMps: number;
+    /** Plafond de vitesse d'un véhicule avec avertisseurs (m/s). */
+    vehicleEmergencySpeedMps: number;
+    /** Distance (m) devant un véhicule à avertisseurs à partir de laquelle il ralentit à l'approche d'une foule. */
+    emergencyCrowdSlowM: number;
+    /** Facteur de vitesse d'un véhicule à avertisseurs près d'une foule dense. */
+    emergencyCrowdFactor: number;
     /** Accélération et décélération (m/s²). */
     footAccelMps2: number;
     vehicleAccelMps2: number;
@@ -119,7 +126,10 @@ export const DEFAULT_SIM_PARAMS: SimParams = {
   speedByKind: { march: 1.1, secondary: 1.2, dispersing: 1.2 },
   units: {
     footSpeedMps: 1.6,
-    vehicleSpeedMps: 6,
+    vehicleSpeedMps: 9,
+    vehicleEmergencySpeedMps: 16,
+    emergencyCrowdSlowM: 40,
+    emergencyCrowdFactor: 0.3,
     footAccelMps2: 2,
     vehicleAccelMps2: 2.5,
     footDecelMps2: 3,

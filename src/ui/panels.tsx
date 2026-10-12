@@ -270,7 +270,7 @@ export function DetailPanel({ ctrl, orderMode, onOrderMode, onCenter, onClose }:
     const v = sim.entity(primary.id);
     if (v && v.entity === 'vehicle') {
       title = movers.length > 1 ? `${movers.length} éléments sélectionnés` : v.callsign;
-      rows = [['Type', VEHICLE_LABEL[v.vehicle]], ['Équipage', String(v.crew)], ...moverRows(ctrl, v)];
+      rows = [['Type', VEHICLE_LABEL[v.vehicle]], ['Équipage', String(v.crew)], ['Avertisseurs', v.emergency ? 'activés (circulation rapide, sens interdits permis)' : 'coupés (circulation normale)'], ...moverRows(ctrl, v)];
       history = sim.journal.forSubject('vehicle', v.id).slice(-6).map((e) => ({ simTimeMs: e.simTimeMs, text: e.text, why: e.why.note }));
     }
   } else {
@@ -316,6 +316,11 @@ export function DetailPanel({ ctrl, orderMode, onOrderMode, onCenter, onClose }:
         {pos && (
           <button type="button" onClick={() => onCenter(pos)} data-testid="center-selection">
             Centrer la carte
+          </button>
+        )}
+        {ctrl.selectedVehicles().length > 0 && (
+          <button type="button" class={ctrl.selectedVehicles().every((e) => e.entity === 'vehicle' && e.emergency) ? 'primary' : ''} data-testid="lights-toggle" aria-pressed={ctrl.selectedVehicles().every((e) => e.entity === 'vehicle' && e.emergency)} onClick={() => ctrl.setLights(!ctrl.selectedVehicles().every((e) => e.entity === 'vehicle' && e.emergency))}>
+            🚨 Avertisseurs
           </button>
         )}
         {canOrder && (

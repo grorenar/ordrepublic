@@ -132,6 +132,7 @@ export class Sim {
     this.state.walkWidth.set(cor.width);
     this.state.walkLeft.set(cor.left);
     this.state.walkRight.set(cor.right);
+    this.mask?.buildWalkable(o.graph, cor.left, cor.right);
     this.rng = new Rng(hash32(this.seed, 0xabcdef));
     this.timeline = [...(o.timeline ?? [])].sort((a, b) => a.atMs - b.atMs || (a.id < b.id ? -1 : 1));
     this.zone = o.zone;
@@ -201,7 +202,7 @@ export class Sim {
   addVehicle(spec: VehicleSpec, cause: Cause): Id {
     this.requireCause(cause);
     const id = `V-${++this.vehicleCounter}`;
-    const e: VehicleEntity = { ...this.baseMover('vehicle', spec.pos, spec.heading ?? 0), id, entity: 'vehicle', vehicle: spec.vehicle, callsign: spec.callsign, crew: spec.crew };
+    const e: VehicleEntity = { ...this.baseMover('vehicle', spec.pos, spec.heading ?? 0), id, entity: 'vehicle', emergency: false, vehicle: spec.vehicle, callsign: spec.callsign, crew: spec.crew };
     this.vehicles.push(e);
     this.moverById.set(id, e);
     this.log('info', 'unit.created', `${e.callsign} : véhicule en position.`, cause, { type: 'vehicle', id });
@@ -419,7 +420,8 @@ export class Sim {
     let cur = from;
     let acc = 0;
     for (const t of targets) {
-      const r = this.nav.findRoute(cur, t, 'crowd', { soft: this.softZone(plan) });
+      // d'abord par des accès libres ; si tous sont saturés, on tente de se frayer un passage dans la zone d'arrivée
+      const r = this.nav.findRoute(cur, t, 'crowd') ?? this.nav.findRoute(cur, t, 'crowd', { soft: this.softZone(plan) });
       if (!r) return null;
       parts.push(r);
       acc += r.length;
@@ -745,7 +747,7 @@ export class Sim {
     if (arriving && g.settleAtS === Infinity && g.plan.destination) {
       this.beginArrival(g);
     }
-    if (g.settleAtS !== Infinity && g.sCentre >= g.settleAtS) this.settle(g);
+    if (g.settleAtS !== Infinity && g.profile && g.profile.area(g.sCentre + g.columnLength / 2) >= g.settleAtS) this.settle(g);
   }
 
   private computeSpeed(g: CrowdGroup): void {
@@ -786,16 +788,17 @@ export class Sim {
     const n = g.members.n;
     const lay = g.layout;
     g.columnLength = Math.max(g.columnLength, 1);
-    let need = g.sCentre;
+    // le groupe s'installe quand TOUS les individus ont rejoint leur créneau (pas avant : aucun n'est « téléporté » à l'installation).
+    // L'individu i est à l'abscisse s_i = inverse(aire(tête) − (n−i−½)/densité) : il a fini sa marche quand s_i ≥ fin de route + distance au créneau.
+    const prof = profileFor(g, this.graph, this.state, this.params);
+    let need = prof.area(g.sCentre + g.columnLength / 2);
     if (lay) {
       const end = routeFrame(g, this.motionCtx(), route, true);
-      const L = g.columnLength;
       for (let i = g.members.activeStart; i < n; i++) {
         const slot = g.members.slotOf[i] as number;
         const e = frameEntry(end, g.members.lat[i] as number);
         const dist = Math.hypot((lay.pts[2 * slot] as number) - e.x, (lay.pts[2 * slot + 1] as number) - e.y);
-        const a = ((i + 0.5) / n - 0.5) * L;
-        need = Math.max(need, route.length + dist - a);
+        need = Math.max(need, prof.area(route.length + dist) + (n - i - 0.5) / g.density);
       }
     }
     g.settleAtS = need;
@@ -850,7 +853,8 @@ export class Sim {
     g.lastRouteStateVersion = this.state.version;
     const headS = Math.min(route.length, g.sCentre + g.columnLength / 2);
     const ei = edgeIndexAt(route, headS);
-    const blockedIdx = this.nav.firstBlockedEdge(route, ei + 1, this.softZone(g.plan));
+    // les accès saturés comptent comme bloqués (même dans la zone d'arrivée) : on cherche d'abord un autre accès
+    const blockedIdx = this.nav.firstBlockedEdge(route, ei + 1);
     if (blockedIdx < 0) {
       if (g.phase === 'waiting') {
         g.phase = 'moving';
@@ -878,14 +882,26 @@ export class Sim {
     const parts: Route[] = [];
     let cur = headPt;
     let ok = true;
+    let usedSoft = false;
     for (let k = 0; k < legs.length; k++) {
-      const r = this.nav.findRoute(cur, legs[k] as Vec2, 'crowd', k === 0 ? { start: { edge: headEdge, t: proj.t, toward }, soft: this.softZone(g.plan) } : { soft: this.softZone(g.plan) });
+      const start = k === 0 ? { start: { edge: headEdge, t: proj.t, toward } } : {};
+      // 1) par un autre accès libre ; 2) à défaut, en se frayant un passage dans la foule dense de la zone d'arrivée
+      let r = this.nav.findRoute(cur, legs[k] as Vec2, 'crowd', start);
+      if (!r) {
+        r = this.nav.findRoute(cur, legs[k] as Vec2, 'crowd', { ...start, soft: this.softZone(g.plan) });
+        usedSoft = true;
+      }
       if (!r) {
         ok = false;
         break;
       }
       parts.push(r);
       cur = legs[k] as Vec2;
+    }
+    // aucun autre accès libre et l'obstacle est la foule dense de la zone d'arrivée : on continue de s'y frayer un passage (pas de nouvelle replanification)
+    const softZone = this.softZone(g.plan);
+    if (ok && usedSoft && softZone && this.nav.inZone(blockedEdge, softZone)) {
+      return;
     }
     if (ok) {
       const oldRemaining = route.length - headS;

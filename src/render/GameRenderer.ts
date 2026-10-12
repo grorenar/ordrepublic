@@ -681,14 +681,20 @@ export class GameRenderer {
     ctx.fillStyle = 'rgba(15,23,42,0.75)';
     ctx.fillRect(len * 0.22, -wid * 0.36, len * 0.14, wid * 0.72);
     if (st.lights !== 'none') {
-      const phase = Math.sin(t * 9 + v.callsign.length) > 0 && this.motion > 0;
+      // gyrophares : allumés (et clignotants) seulement quand les avertisseurs sont actifs
+      const phase = v.emergency && Math.sin(t * 9 + v.callsign.length) > 0 && this.motion >= 0;
+      const on = v.emergency;
       const flash = (x: number, y: number, color: string) => {
         ctx.fillStyle = color;
         ctx.beginPath();
         ctx.arc(x, y, Math.max(2, wid * 0.14), 0, Math.PI * 2);
         ctx.fill();
       };
-      if (st.lights === 'emergency') {
+      if (!on) {
+        // avertisseurs coupés : feux éteints
+        flash(len * 0.28, -wid * 0.28, 'rgba(100,116,139,0.7)');
+        flash(len * 0.28, wid * 0.28, 'rgba(100,116,139,0.7)');
+      } else if (st.lights === 'emergency') {
         flash(len * 0.3, -wid * 0.3, phase ? '#ff2d2d' : '#3b82f6');
         flash(len * 0.3, wid * 0.3, phase ? '#3b82f6' : '#ff2d2d');
       } else {

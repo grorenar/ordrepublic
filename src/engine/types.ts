@@ -116,6 +116,16 @@ export interface StaticLayout {
   count: number;
   rMax: number;
   overflow: number;
+  /** État du remplissage géodésique (reprise au prochain agrandissement du groupe). */
+  geo?: GeoFill;
+}
+
+/** Remplissage d'un rassemblement par distance de MARCHE depuis l'ancre (contourne les bâtiments, reste sur les surfaces praticables). */
+export interface GeoFill {
+  heap: import('../nav/heap').MinHeap;
+  seen: Set<number>;
+  carry: number;
+  cells: number;
 }
 
 export interface Blend {
@@ -174,6 +184,7 @@ export interface CrowdGroup {
   entry: 'inside' | 'gateway';
   // arrivée / rassemblement statique
   layout: StaticLayout | null;
+  /** Aire cumulée que doit atteindre la TÊTE de colonne pour que tous les individus aient rejoint leur créneau (Infinity = arrivée non commencée). */
   settleAtS: number;
   // dispersion
   dispersal: Dispersal | null;
@@ -257,6 +268,8 @@ export interface UnitEntity extends Mover {
 export interface VehicleEntity extends Mover {
   id: Id;
   entity: 'vehicle';
+  /** Avertisseurs lumineux et sonores : plus rapide (limites non respectées), sens interdits permis, ralentit près de la foule. */
+  emergency: boolean;
   vehicle: VehicleKind;
   callsign: string;
   crew: number;
@@ -284,7 +297,9 @@ export interface VehicleSpec {
 
 export type OrderRequest =
   | { kind: 'move'; ids: Id[]; target: Vec2 }
-  | { kind: 'cancel'; ids: Id[] };
+  | { kind: 'cancel'; ids: Id[] }
+  /** Active ou coupe les avertisseurs des véhicules (les unités à pied sont ignorées). */
+  | { kind: 'lights'; ids: Id[]; on: boolean };
 
 export interface OrderResult {
   id: Id;

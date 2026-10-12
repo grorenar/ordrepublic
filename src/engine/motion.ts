@@ -3,7 +3,7 @@ import { RouteCursor, locate, type CursorOut, type Located, type Route } from '.
 import type { EdgeState } from '../nav/streetState';
 import type { WalkMask } from '../nav/walkMask';
 import { profileFor, profileOfRoute } from './column';
-import { snapToWalkable } from './layout';
+import { lineClear, snapToWalkable } from './layout';
 import type { SimParams } from './params';
 import { noise } from './rng';
 import type { CrowdGroup } from './types';
@@ -253,6 +253,21 @@ function followTargets(g: CrowdGroup, c: MotionCtx, i0: number, i1: number): voi
   }
 }
 
+/** Point de l'AXE de la rue de l'individu `i` (toujours praticable) : étape de contournement quand un mur ou un coin bloque le chemin direct. */
+function axisPoint(g: CrowdGroup, c: MotionCtx, i: number, out: { x: number; y: number }): boolean {
+  if (!g.route || g.kind === 'static' || (g.phase !== 'moving' && g.phase !== 'waiting' && g.phase !== 'forming')) return false;
+  const route = g.route;
+  const prof = profileFor(g, c.graph, c.state, c.params);
+  const s = prof.inverse(prof.area(g.sCentre + g.columnLength / 2) - (g.members.n - i - 0.5) / g.density);
+  if (s >= route.length) return false;
+  const cur2: CursorOut = { x: 0, y: 0, nx: 0, ny: 1, edge: 0, dStart: 0, dEnd: 0 };
+  new RouteCursor(route).at(Math.max(0, s), cur2);
+  out.x = cur2.x;
+  out.y = cur2.y;
+  return true;
+}
+const axisTmp = { x: 0, y: 0 };
+
 /** N2 : dynamique individuelle (rappel amorti + bruit stateless + rejet des bâtiments). */
 function dynamics(g: CrowdGroup, c: MotionCtx, i0: number, i1: number): void {
   const m = g.members;
@@ -282,12 +297,53 @@ function dynamics(g: CrowdGroup, c: MotionCtx, i0: number, i1: number): void {
     const step = Math.min(d, Math.min(k * d, vmax) * dt);
     const nx = cx + (dx / d) * step;
     const ny = cy + (dy / d) * step;
+    // un bâtiment se dresse entre l'individu et sa cible : il rejoint l'axe de la rue (praticable) avant de reprendre sa cible
+    if (mask && d > 1.2 && !mask.isBlocked(cx, cy) && !lineClear(mask, cx, cy, (tx[i] as number) + ox, (ty[i] as number) + oy, 1.2) && axisPoint(g, c, i, axisTmp)) {
+      const ax = axisTmp.x - cx;
+      const ay = axisTmp.y - cy;
+      const da = Math.hypot(ax, ay);
+      if (da > 0.3) {
+        const sa = Math.min(da, Math.min(k * da, vmax) * dt);
+        const mx = cx + (ax / da) * sa;
+        const my = cy + (ay / da) * sa;
+        if (!mask.isBlocked(mx, my)) {
+          x[i] = mx;
+          y[i] = my;
+          continue;
+        }
+      }
+    }
     if (mask && mask.isBlocked(nx, ny)) {
-      // un individu déjà DANS un bâtiment (placé là par une donnée imparfaite) en sort : il n'est jamais figé
+      // un individu déjà DANS un bâtiment (placé là par une donnée imparfaite) en sort par l'axe de la rue (praticable), sinon vers sa cible
       if (mask.isBlocked(cx, cy)) {
-        x[i] = nx;
-        y[i] = ny;
+        if (axisPoint(g, c, i, axisTmp)) {
+          const ax = axisTmp.x - cx;
+          const ay = axisTmp.y - cy;
+          const da = Math.hypot(ax, ay) || 1;
+          const sa = Math.min(da, vmax * dt);
+          x[i] = cx + (ax / da) * sa;
+          y[i] = cy + (ay / da) * sa;
+        } else {
+          x[i] = nx;
+          y[i] = ny;
+        }
         continue;
+      }
+      // chemin direct bloqué par un coin de bâtiment : on rejoint d'abord l'axe de la rue, puis la cible (contournement, pas de coin coupé)
+      if (axisPoint(g, c, i, axisTmp)) {
+        const ax = axisTmp.x - cx;
+        const ay = axisTmp.y - cy;
+        const da = Math.hypot(ax, ay);
+        if (da > 0.3) {
+          const sa = Math.min(da, vmax * dt);
+          const mx = cx + (ax / da) * sa;
+          const my = cy + (ay / da) * sa;
+          if (!mask.isBlocked(mx, my)) {
+            x[i] = mx;
+            y[i] = my;
+            continue;
+          }
+        }
       }
       // glissement le long du bâtiment, sinon immobile : aucun individu n'entre dans un bâtiment
       if (!mask.isBlocked(nx, cy)) x[i] = nx;

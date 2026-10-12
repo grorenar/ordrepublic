@@ -156,6 +156,19 @@ export class GameController {
     return this.lastOrders;
   }
 
+  /** Véhicules sélectionnés (les unités à pied n'ont pas d'avertisseurs). */
+  selectedVehicles(): MoverEntity[] {
+    return this.selectedMovers().filter((e) => e.entity === 'vehicle');
+  }
+
+  /** Active ou coupe les avertisseurs de tous les véhicules sélectionnés. */
+  setLights(on: boolean): OrderResult[] {
+    const ids = this.selectedVehicles().map((e) => e.id);
+    if (!ids.length) return [];
+    this.lastOrders = this.sim.issueOrder({ kind: 'lights', ids, on });
+    return this.lastOrders;
+  }
+
   cancelOrders(): OrderResult[] {
     const ids = this.selectedMovers().map((e) => e.id);
     if (!ids.length) return [];

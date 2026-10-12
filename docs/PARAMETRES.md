@@ -59,7 +59,10 @@ Contrôles de cohérence appliqués à la création d’un `Sim` (`validateSimPa
 | Paramètre | Unité | Défaut | Signification | Effet sur la simulation |
 |---|---|---|---|---|
 | `units.footSpeedMps` | m/s | 1.6 | Vitesse maximale d’une unité à pied. | Réduite par la densité de foule sur la rue (facteur de vitesse piéton). |
-| `units.vehicleSpeedMps` | m/s | 6 | Vitesse maximale d’un véhicule en ville. | Réduite en rue ralentie/partiellement obstruée (×0,7 / ×0,35). |
+| `units.vehicleSpeedMps` | m/s | 9 | Plafond de vitesse d’un véhicule en circulation normale (la limite de la classe de voie s’applique en dessous). | Réduite en rue ralentie/partiellement obstruée (×0,7 / ×0,35). |
+| `units.vehicleEmergencySpeedMps` | m/s | 16 | Plafond de vitesse d’un véhicule avec avertisseurs lumineux actifs. | Vitesse = limite de la classe de voie × nav.emergencySpeedFactor, plafonnée ici : limites non respectées. |
+| `units.emergencyCrowdSlowM` | m | 40 | Distance devant un véhicule à avertisseurs à partir de laquelle il ralentit à l’approche d’une foule (≥ 10 personnes sur une rue de sa route). | Plus grand : freine plus tôt. |
+| `units.emergencyCrowdFactor` | sans unité (0–1) | 0.3 | Facteur de vitesse d’un véhicule à avertisseurs au contact d’une foule. | Décroît linéairement avec la distance jusqu’à cette valeur au niveau de la foule ; sans foule devant : pleine vitesse. |
 | `units.footAccelMps2` | m/s² | 2 | Accélération d’une unité à pied. | Temps pour atteindre la vitesse maximale. |
 | `units.vehicleAccelMps2` | m/s² | 2.5 | Accélération d’un véhicule. | Temps pour atteindre la vitesse maximale du véhicule. |
 | `units.footDecelMps2` | m/s² | 3 | Décélération d’une unité à pied. | Distance de freinage avant l’arrivée. |
@@ -92,6 +95,7 @@ Contrôles de cohérence appliqués à la création d’un `Sim` (`validateSimPa
 | `nav.speedVehicleByClass.*` | m/s | 0: 8 · 1: 7 · 2: 6.5 · 3: 5.5 · 4: 5 · 5: 3 · 6: 3 | Vitesse nominale des véhicules par classe de voie (0 = interdit). | Préférence d’itinéraire des véhicules (grandes voies favorisées). |
 | `nav.crowdPreferredWidthM` | m | 8 | Largeur praticable en dessous de laquelle une rue est pénalisée pour un cortège. | Les cortèges préfèrent les rues larges ; une ruelle reste possible si c’est nécessaire. |
 | `nav.crowdNarrowPenalty` | multiple | 1.2 | Surcoût maximal (proportionnel au manque de largeur) pour un cortège dans une rue très étroite. | 0 : aucune préférence de largeur. |
+| `nav.emergencySpeedFactor` | multiple | 1.8 | Multiple de la vitesse de la classe de voie atteint par un véhicule avec avertisseurs. | Itinéraires et vitesses des véhicules d’urgence ; les sens interdits sont aussi permis. |
 | `nav.crowdPenaltyFootway` | multiple | 0.5 | Surcoût pour un cortège empruntant un chemin piéton étroit. | Les cortèges préfèrent rues et places. |
 | `nav.crowdPenaltySteps` | multiple | 2 | Surcoût pour un cortège empruntant des escaliers. | Les cortèges évitent les escaliers sauf nécessité. |
 | `nav.maxDetourRatio` | ratio (∞ = aucun) | ∞ | Détour maximal accepté par rapport à l’itinéraire direct. | Infini par défaut : aucun facteur ne peut empêcher un itinéraire alternatif valide. |

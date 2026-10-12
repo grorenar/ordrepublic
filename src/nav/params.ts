@@ -7,6 +7,8 @@ export interface NavParams {
   speedFootMps: number;
   speedVehicleByClass: Record<number, number>;
   /** Multiplicateurs de coût pour les cortèges (préfèrent rues et places). */
+  /** Un véhicule avec avertisseurs roule jusqu'à ce multiple de la vitesse de sa classe de voie (limites non respectées). */
+  emergencySpeedFactor: number;
   crowdPenaltyFootway: number;
   /** Largeur praticable (m) en dessous de laquelle une rue est pénalisée pour un cortège (surcoût proportionnel au manque). */
   crowdPreferredWidthM: number;
@@ -48,6 +50,7 @@ export const DEFAULT_NAV_PARAMS: NavParams = {
     [EdgeClass.LivingStreet]: 3,
     [EdgeClass.Service]: 3,
   },
+  emergencySpeedFactor: 1.8,
   crowdPenaltyFootway: 0.5,
   crowdPreferredWidthM: 8,
   crowdNarrowPenalty: 1.2,

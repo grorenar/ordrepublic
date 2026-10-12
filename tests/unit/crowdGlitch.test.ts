@@ -108,3 +108,43 @@ describe('les gens occupent l’espace en se séparant, sans ralentir', () => {
     expect(speedPlaza).toBeGreaterThan(speedStreet * 0.95); // sans ralentir
   }, 120_000);
 });
+
+describe('la rue prime sur un bâtiment mal superposé (axe d’une voie dans l’emprise d’un bâtiment)', () => {
+  it('un bâtiment cartographié par-dessus l’axe de la rue ne piège ni ne laisse en arrière une partie du cortège', () => {
+    // bâtiment de 40 m recouvrant l'axe de la rue, sans étiquette tunnel (cour d'église, passage non cartographié…)
+    const graph = gridGraph({ cols: 6, rows: 1, spacing: 100, width: 6, obstacles: [strip(-20, 20, -25, 25)] });
+    const sim = new Sim({ graph, seed: 1 });
+    const g = sim.group(sim.createGroup({ label: 'c', kind: 'march', size: 800, cohesion: 100, origin: { x: -250, y: 0 }, plan: { destination: anchorAt({ x: 250, y: 0 }), waypoints: [], onArrival: 'settle', patienceMs: 0 } }, PLAN))!;
+    for (let t = 0; t < 16000 && g.phase !== 'settled'; t++) sim.step();
+    sim.run(900);
+    let behind = 0;
+    let inside = 0;
+    for (let i = 0; i < g.members.n; i++) {
+      if ((g.members.x[i] as number) < 120) behind++;
+      if (sim.mask!.isBlocked(g.members.x[i] as number, g.members.y[i] as number)) inside++;
+    }
+    expect(g.phase).toBe('settled');
+    expect(behind).toBe(0); // personne n'est resté coincé avant le bâtiment
+    expect(inside).toBe(0);
+  }, 120_000);
+
+  it('un coin de bâtiment entre un individu et sa cible : il contourne par l’axe de la rue au lieu de rester collé au mur', () => {
+    // carrefour en L : le bâtiment occupe l'angle intérieur ; la foule tourne à 90°
+    const bl = strip(8, 160, 8, 160);
+    const graph = gridGraph({ cols: 3, rows: 3, spacing: 100, width: 8, obstacles: [bl] });
+    const sim = new Sim({ graph, seed: 1 });
+    const g = sim.group(sim.createGroup({ label: 'c', kind: 'march', size: 600, cohesion: 100, origin: { x: -100, y: -100 }, plan: { destination: anchorAt({ x: 100, y: 100 }), waypoints: [], onArrival: 'settle', patienceMs: 0 } }, PLAN))!;
+    let worstStall = 0;
+    for (let t = 0; t < 20000 && g.phase !== 'settled'; t++) {
+      sim.step();
+      if (t % 200 === 0 && g.phase === 'moving') {
+        // individus immobiles (< 1 cm depuis le tick précédent) alors que la colonne avance
+        let still = 0;
+        for (let i = g.members.activeStart; i < g.members.n; i++) if (Math.hypot((g.members.x[i] as number) - (g.members.px[i] as number), (g.members.y[i] as number) - (g.members.py[i] as number)) < 1e-3 && g.speedMps > 0.4) still++;
+        worstStall = Math.max(worstStall, still / g.members.n);
+      }
+    }
+    expect(g.phase).toBe('settled');
+    expect(worstStall).toBeLessThan(0.05);
+  }, 120_000);
+});

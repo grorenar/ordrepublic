@@ -1,6 +1,7 @@
 import type { Vec2 } from '../geo/mercator';
 
-export type NavMode = 'crowd' | 'foot' | 'vehicle';
+/** `emergency` : véhicule avec avertisseurs — mêmes voies que `vehicle` mais sens interdits permis et limites de vitesse non respectées. */
+export type NavMode = 'crowd' | 'foot' | 'vehicle' | 'emergency';
 
 /**
  * Itinéraire : polyligne continue + abscisses curvilignes. Les arêtes de départ et d'arrivée sont

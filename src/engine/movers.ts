@@ -40,6 +40,11 @@ export class MoverSystem {
   }
 
   /** Place une entité sur le réseau (accrochage à l'arête la plus proche) ; null si le réseau est hors de portée. */
+  /** Mode de navigation d'une entité : un véhicule à avertisseurs circule à contresens et plus vite. */
+  private navMode(e: MoverEntity): 'foot' | 'vehicle' | 'emergency' {
+    return e.mode === 'foot' ? 'foot' : e.entity === 'vehicle' && e.emergency ? 'emergency' : 'vehicle';
+  }
+
   placeOnGraph(pos: Vec2, mode: 'foot' | 'vehicle'): Vec2 | null {
     const pr = this.d.nav.snap(pos, mode, 600);
     return pr ? pr.point : null;
@@ -51,13 +56,40 @@ export class MoverSystem {
 
   /** Itinéraire d'aperçu (sans modifier l'état) pour l'interface : ligne fantôme avant validation d'un ordre. */
   preview(e: MoverEntity, target: Vec2): Route | null {
-    return this.d.nav.findRoute({ x: e.x, y: e.y }, target, e.mode, { soft: this.softZone(target, e.mode) });
+    return this.d.nav.findRoute({ x: e.x, y: e.y }, target, this.navMode(e), { soft: this.softZone(target, e.mode) });
   }
 
   /** Traite une demande d'ordre pour un ensemble d'entités (ordres simultanés, ordre déterministe par identifiant). */
   apply(req: OrderRequest, entities: ReadonlyMap<Id, MoverEntity>): OrderResult[] {
     const ids = [...new Set(req.ids)].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
     const results: OrderResult[] = [];
+    if (req.kind === 'lights') {
+      for (const id of ids) {
+        const e = entities.get(id);
+        if (!e || e.entity !== 'vehicle') {
+          results.push({ id, ok: false, reason: e ? 'seuls les véhicules ont des avertisseurs' : 'entité inconnue' });
+          continue;
+        }
+        if (e.emergency === req.on) {
+          results.push({ id, ok: true });
+          continue;
+        }
+        e.emergency = req.on;
+        const why: Cause = { kind: 'player_order', refId: id, note: `avertisseurs ${req.on ? 'activés' : 'coupés'} par le joueur` };
+        this.d.log('info', req.on ? 'vehicle.lights_on' : 'vehicle.lights_off', `${e.callsign} : avertisseurs ${req.on ? 'activés — circulation rapide, sens interdits permis, prudence près de la foule' : 'coupés — circulation normale'}.`, why, { type: 'vehicle', id });
+        // l'itinéraire en cours est recalculé avec les nouvelles règles (sens interdits, vitesse)
+        if (e.order && e.route) {
+          const fresh = this.d.nav.findRoute({ x: e.x, y: e.y }, e.order.target, this.navMode(e));
+          if (fresh) {
+            e.route = fresh;
+            e.routeS = 0;
+            e.lastRouteStateVersion = this.d.state.version;
+          }
+        }
+        results.push({ id, ok: true });
+      }
+      return results;
+    }
     if (req.kind === 'cancel') {
       for (const id of ids) {
         const e = entities.get(id);
@@ -90,7 +122,7 @@ export class MoverSystem {
       const ring = Math.sqrt(k) * spacing;
       const ang = k * 2.399963;
       const target = { x: req.target.x + ring * Math.cos(ang), y: req.target.y + ring * Math.sin(ang) };
-      const route = this.d.nav.findRoute({ x: e.x, y: e.y }, target, e.mode, { soft: this.softZone(target, e.mode) });
+      const route = this.d.nav.findRoute({ x: e.x, y: e.y }, target, this.navMode(e), { soft: this.softZone(target, e.mode) });
       if (!route) {
         const why: Cause = { kind: 'player_order', refId: 'refus', note: 'ordre du joueur impossible à exécuter' };
         this.d.log('warn', 'unit.order_refused', `${e.callsign} : ordre refusé — aucun itinéraire ${e.mode === 'vehicle' ? 'praticable par un véhicule' : 'praticable'} vers la destination.`, why, { type: this.subjectType(e), id });
@@ -119,7 +151,8 @@ export class MoverSystem {
     e.py = e.y;
     e.prevHeading = e.heading;
     const vehicle = e.mode === 'vehicle';
-    const vmax = vehicle ? p.vehicleSpeedMps : p.footSpeedMps;
+    const emergency = e.entity === 'vehicle' && e.emergency;
+    let vmax = vehicle ? p.vehicleSpeedMps : p.footSpeedMps;
     const accel = vehicle ? p.vehicleAccelMps2 : p.footAccelMps2;
     const decel = vehicle ? p.vehicleDecelMps2 : p.footDecelMps2;
     const turn = vehicle ? p.vehicleTurnRateRadPerS : p.footTurnRateRadPerS;
@@ -148,10 +181,26 @@ export class MoverSystem {
     const ei = edgeIndexAt(r, e.routeS);
     const edge = r.edges[ei] as number;
     const st = this.d.state;
+    // limite de vitesse de la classe de voie (les avertisseurs permettent de la dépasser, jusqu'à un plafond)
+    if (vehicle) {
+      const lim = this.d.params.nav.speedVehicleByClass[this.d.graph.edgeClass[edge] as number] ?? 4;
+      vmax = emergency ? Math.min(p.vehicleEmergencySpeedMps, lim * this.d.params.nav.emergencySpeedFactor) : Math.min(p.vehicleSpeedMps, lim);
+    }
     let factor = 1;
     if (vehicle) {
       const s = st.vehState[edge] as number;
       factor = s === 0 ? 1 : s === 1 ? 0.7 : 0.35;
+      // avertisseurs actifs : on ralentit à l'approche d'une foule, sinon on roule à pleine vitesse
+      if (emergency) {
+        for (let k = ei; k < r.edges.length; k++) {
+          const d = Math.max(0, (r.edgeStart[k] as number) - e.routeS);
+          if (d >= p.emergencyCrowdSlowM) break;
+          if ((st.load[r.edges[k] as number] as number) >= 10) {
+            factor *= p.emergencyCrowdFactor + (1 - p.emergencyCrowdFactor) * (d / p.emergencyCrowdSlowM);
+            break;
+          }
+        }
+      }
     } else factor = st.speedFactor[edge] as number;
     const brake = Math.sqrt(Math.max(0, 2 * decel * Math.max(0, remaining - p.arrivalToleranceM * 0.5)));
     const target = Math.min(vmax * factor, brake);
@@ -207,7 +256,7 @@ export class MoverSystem {
     if (ei < route.edges.length - 1 && toward !== undefined) {
       const headEdge = route.edges[ei] as number;
       const proj = projectOnEdge(this.d.graph, headEdge, { x: e.x, y: e.y });
-      const fresh = this.d.nav.findRoute({ x: e.x, y: e.y }, order.target, e.mode, { start: { edge: headEdge, t: proj.t, toward }, soft });
+      const fresh = this.d.nav.findRoute({ x: e.x, y: e.y }, order.target, this.navMode(e), { start: { edge: headEdge, t: proj.t, toward }, soft });
       if (fresh) {
         const added = e.routeS + fresh.length - route.length;
         e.route = joinRoutes([truncateRoute(route, e.routeS), fresh]);

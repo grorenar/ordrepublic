@@ -40,17 +40,21 @@ export class NavContext {
   /** Une arête est-elle empruntable dans ce sens par ce mode (indépendamment de l'état dynamique) ? */
   canTraverse(e: number, forward: boolean, mode: NavMode): boolean {
     const f = this.graph.edgeFlags[e] as number;
-    if (mode === 'vehicle') {
+    if (mode === 'vehicle' || mode === 'emergency') {
       if (!(f & EdgeFlag.Motor)) return false;
-      if (f & EdgeFlag.Oneway && !forward) return false;
-      if (f & EdgeFlag.OnewayRev && forward) return false;
+      // avertisseurs actifs : sens interdits permis (circulation à contresens)
+      if (mode === 'vehicle') {
+        if (f & EdgeFlag.Oneway && !forward) return false;
+        if (f & EdgeFlag.OnewayRev && forward) return false;
+      }
       return (this.params.speedVehicleByClass[this.graph.edgeClass[e] as number] ?? 0) > 0;
     }
     return (f & EdgeFlag.Foot) !== 0;
   }
 
   /** Milieu d'une arête (pour la zone d'arrivée). */
-  private inZone(e: number, z: SoftZone): boolean {
+  /** L'arête est-elle dans la zone d'arrivée (traversée lente d'une foule dense permise) ? */
+  inZone(e: number, z: SoftZone): boolean {
     const g = this.graph;
     const mx = ((g.nodeX[g.edgeA[e] as number] as number) + (g.nodeX[g.edgeB[e] as number] as number)) / 2;
     const my = ((g.nodeY[g.edgeA[e] as number] as number) + (g.nodeY[g.edgeB[e] as number] as number)) / 2;
@@ -67,9 +71,10 @@ export class NavContext {
     const cls = this.graph.edgeClass[e] as number;
     let speed: number;
     let mult = 1;
-    if (mode === 'vehicle') {
+    if (mode === 'vehicle' || mode === 'emergency') {
       speed = p.speedVehicleByClass[cls] ?? 0;
       if (speed <= 0) return Infinity;
+      if (mode === 'emergency') speed *= p.emergencySpeedFactor;
     } else {
       speed = p.speedFootMps;
       if (mode === 'crowd') {
@@ -83,7 +88,7 @@ export class NavContext {
     if (dynamic && this.state) {
       const st = this.state;
       if (st.scenarioBlock[e]) return Infinity;
-      if (mode === 'vehicle') {
+      if (mode === 'vehicle' || mode === 'emergency') {
         const s = st.vehState[e] as number;
         if (s === 3) return Infinity;
         speed *= s === 0 ? 1 : s === 1 ? 0.7 : 0.35;
@@ -124,7 +129,7 @@ export class NavContext {
     const baseRate = (e: number) => this.edgeCost(e, mode, 1, false); // coût/m sans état dynamique (sortie d'une rue bloquée)
     const soft = opts.soft;
     const dynRate = (e: number) => this.edgeCost(e, mode, 1, true, soft); // coût/m avec état dynamique (∞ si impraticable)
-    const vMax = mode === 'vehicle' ? this.vMaxVehicle : this.params.speedFootMps;
+    const vMax = mode === 'vehicle' ? this.vMaxVehicle : mode === 'emergency' ? this.vMaxVehicle * this.params.emergencySpeedFactor : this.params.speedFootMps;
 
     // Candidat direct (même arête).
     let best = Infinity;
@@ -290,6 +295,8 @@ export class NavContext {
   firstBlockedEdge(route: Route, fromIndex: number, soft?: SoftZone): number {
     for (let i = Math.max(0, fromIndex); i < route.edges.length; i++) {
       const e = route.edges[i] as number;
+      // une arête parcourue sur moins de 0,5 m (point de départ ou d'arrivée posé sur un nœud) ne compte pas comme obstacle
+      if ((route.edgeStart[i + 1] as number) - (route.edgeStart[i] as number) < 0.5) continue;
       if (!isFinite(this.edgeCost(e, route.mode, 1, true, soft))) return i;
     }
     return -1;

@@ -54,7 +54,10 @@ export const PARAM_DOCS: ParamDoc[] = [
 
   // --- unités
   { path: 'units.footSpeedMps', group: 'Unités et véhicules', unit: 'm/s', meaning: 'Vitesse maximale d’une unité à pied.', effect: 'Réduite par la densité de foule sur la rue (facteur de vitesse piéton).' },
-  { path: 'units.vehicleSpeedMps', group: 'Unités et véhicules', unit: 'm/s', meaning: 'Vitesse maximale d’un véhicule en ville.', effect: 'Réduite en rue ralentie/partiellement obstruée (×0,7 / ×0,35).' },
+  { path: 'units.vehicleSpeedMps', group: 'Unités et véhicules', unit: 'm/s', meaning: 'Plafond de vitesse d’un véhicule en circulation normale (la limite de la classe de voie s’applique en dessous).', effect: 'Réduite en rue ralentie/partiellement obstruée (×0,7 / ×0,35).' },
+  { path: 'units.vehicleEmergencySpeedMps', group: 'Unités et véhicules', unit: 'm/s', meaning: 'Plafond de vitesse d’un véhicule avec avertisseurs lumineux actifs.', effect: 'Vitesse = limite de la classe de voie × nav.emergencySpeedFactor, plafonnée ici : limites non respectées.' },
+  { path: 'units.emergencyCrowdSlowM', group: 'Unités et véhicules', unit: 'm', meaning: 'Distance devant un véhicule à avertisseurs à partir de laquelle il ralentit à l’approche d’une foule (≥ 10 personnes sur une rue de sa route).', effect: 'Plus grand : freine plus tôt.' },
+  { path: 'units.emergencyCrowdFactor', group: 'Unités et véhicules', unit: 'sans unité (0–1)', meaning: 'Facteur de vitesse d’un véhicule à avertisseurs au contact d’une foule.', effect: 'Décroît linéairement avec la distance jusqu’à cette valeur au niveau de la foule ; sans foule devant : pleine vitesse.' },
   { path: 'units.footAccelMps2', group: 'Unités et véhicules', unit: 'm/s²', meaning: 'Accélération d’une unité à pied.', effect: 'Temps pour atteindre la vitesse maximale.' },
   { path: 'units.vehicleAccelMps2', group: 'Unités et véhicules', unit: 'm/s²', meaning: 'Accélération d’un véhicule.', effect: 'Temps pour atteindre la vitesse maximale du véhicule.' },
   { path: 'units.footDecelMps2', group: 'Unités et véhicules', unit: 'm/s²', meaning: 'Décélération d’une unité à pied.', effect: 'Distance de freinage avant l’arrivée.' },
@@ -81,6 +84,7 @@ export const PARAM_DOCS: ParamDoc[] = [
   { path: 'nav.speedVehicleByClass.*', group: 'Rues et navigation', unit: 'm/s', meaning: 'Vitesse nominale des véhicules par classe de voie (0 = interdit).', effect: 'Préférence d’itinéraire des véhicules (grandes voies favorisées).' },
   { path: 'nav.crowdPreferredWidthM', group: 'Rues et navigation', unit: 'm', meaning: 'Largeur praticable en dessous de laquelle une rue est pénalisée pour un cortège.', effect: 'Les cortèges préfèrent les rues larges ; une ruelle reste possible si c’est nécessaire.' },
   { path: 'nav.crowdNarrowPenalty', group: 'Rues et navigation', unit: 'multiple', meaning: 'Surcoût maximal (proportionnel au manque de largeur) pour un cortège dans une rue très étroite.', effect: '0 : aucune préférence de largeur.' },
+  { path: 'nav.emergencySpeedFactor', group: 'Rues et navigation', unit: 'multiple', meaning: 'Multiple de la vitesse de la classe de voie atteint par un véhicule avec avertisseurs.', effect: 'Itinéraires et vitesses des véhicules d’urgence ; les sens interdits sont aussi permis.' },
   { path: 'nav.crowdPenaltyFootway', group: 'Rues et navigation', unit: 'multiple', meaning: 'Surcoût pour un cortège empruntant un chemin piéton étroit.', effect: 'Les cortèges préfèrent rues et places.' },
   { path: 'nav.crowdPenaltySteps', group: 'Rues et navigation', unit: 'multiple', meaning: 'Surcoût pour un cortège empruntant des escaliers.', effect: 'Les cortèges évitent les escaliers sauf nécessité.' },
   { path: 'nav.maxDetourRatio', group: 'Rues et navigation', unit: 'ratio (∞ = aucun)', meaning: 'Détour maximal accepté par rapport à l’itinéraire direct.', effect: 'Infini par défaut : aucun facteur ne peut empêcher un itinéraire alternatif valide.' },

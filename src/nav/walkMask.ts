@@ -11,6 +11,9 @@ export class WalkMask {
   private readonly data: Uint8Array;
   /** Espaces ouverts cartographiés (places, zones piétonnes, parcs) : une foule peut s'y étaler hors de la rue. */
   private readonly open: Uint8Array;
+  /** Surface praticable : couloirs des rues (façade à façade) ∪ espaces ouverts, hors bâtiments. Vide tant que `buildWalkable` n'a pas été appelé. */
+  private readonly walk: Uint8Array;
+  private walkReady = false;
 
   constructor(
     readonly minX: number,
@@ -23,6 +26,7 @@ export class WalkMask {
     this.rows = Math.max(1, Math.ceil((maxY - minY) / res));
     this.data = new Uint8Array(this.cols * this.rows);
     this.open = new Uint8Array(this.cols * this.rows);
+    this.walk = new Uint8Array(this.cols * this.rows);
   }
 
   static fromGraph(g: StreetGraph, res = 1, margin = 100): WalkMask {
@@ -43,8 +47,9 @@ export class WalkMask {
     for (const sp of g.spaces) m.rasterize({ ring: sp.ring, source: sp.source }, m.open, 1);
     // les voies en tunnel / passage couvert / pont ne sont pas bloquées par les bâtiments cartographiés au-dessus
     for (let e = 0; e < g.edgeCount; e++) {
-      if (!((g.edgeFlags[e] as number) & (EdgeFlag.Tunnel | EdgeFlag.Bridge))) continue;
-      const half = Math.max(1.5, (g.edgeWidth[e] as number) / 2 + 0.5);
+      const covered = ((g.edgeFlags[e] as number) & (EdgeFlag.Tunnel | EdgeFlag.Bridge)) !== 0;
+      // la rue prime sur un bâtiment mal superposé : l'axe de toute voie reste praticable (bande de ±1 à 3 m) ; sous un tunnel ou un pont, toute la largeur
+      const half = covered ? Math.max(1.5, (g.edgeWidth[e] as number) / 2 + 0.5) : Math.max(1, Math.min(3, (g.edgeWidth[e] as number) / 2));
       for (let i = (g.shapeStart[e] as number) + 1; i < (g.shapeStart[e + 1] as number); i++) {
         m.clearSegment(g.shape[2 * (i - 1)]!, g.shape[2 * (i - 1) + 1]!, g.shape[2 * i]!, g.shape[2 * i + 1]!, half);
       }
@@ -85,6 +90,62 @@ export class WalkMask {
         for (let c = c0; c <= c1; c++) target[r * this.cols + c] = value;
       }
     }
+  }
+
+  /**
+   * Construit la surface praticable : pour chaque rue, le couloir mesuré de part et d'autre de l'axe (`left`/`right`, orientation a→b),
+   * plus les espaces ouverts cartographiés. Un rassemblement ne déborde pas hors de cette surface (fleuve, parking, pelouse non cartographiée).
+   */
+  buildWalkable(g: StreetGraph, left: Float32Array, right: Float32Array): void {
+    this.walk.fill(0);
+    for (let e = 0; e < g.edgeCount; e++) {
+      const l = left[e] as number;
+      const r = right[e] as number;
+      const a = g.shapeStart[e] as number;
+      const b = g.shapeStart[e + 1] as number;
+      for (let i = a + 1; i < b; i++) {
+        const x0 = g.shape[2 * (i - 1)] as number;
+        const y0 = g.shape[2 * (i - 1) + 1] as number;
+        const x1 = g.shape[2 * i] as number;
+        const y1 = g.shape[2 * i + 1] as number;
+        const len = Math.hypot(x1 - x0, y1 - y0);
+        if (len < 1e-6) continue;
+        const nx = -(y1 - y0) / len;
+        const ny = (x1 - x0) / len;
+        this.rasterize({ ring: new Float32Array([x0 + nx * l, y0 + ny * l, x1 + nx * l, y1 + ny * l, x1 - nx * r, y1 - ny * r, x0 - nx * r, y0 - ny * r]) }, this.walk, 1);
+        this.fillDisk(x1, y1, Math.max(l, r));
+        if (i === a + 1) this.fillDisk(x0, y0, Math.max(l, r));
+      }
+    }
+    for (const sp of g.spaces) this.rasterize({ ring: sp.ring }, this.walk, 1);
+    this.walkReady = true;
+  }
+
+  private fillDisk(x: number, y: number, rad: number): void {
+    const c0 = Math.floor((x - rad - this.minX) / this.res);
+    const c1 = Math.floor((x + rad - this.minX) / this.res);
+    const r0 = Math.floor((y - rad - this.minY) / this.res);
+    const r1 = Math.floor((y + rad - this.minY) / this.res);
+    for (let r = Math.max(0, r0); r <= Math.min(this.rows - 1, r1); r++) {
+      for (let c = Math.max(0, c0); c <= Math.min(this.cols - 1, c1); c++) {
+        const cx = this.minX + (c + 0.5) * this.res;
+        const cy = this.minY + (r + 0.5) * this.res;
+        if (Math.hypot(cx - x, cy - y) <= rad) this.walk[r * this.cols + c] = 1;
+      }
+    }
+  }
+
+  get hasWalkable(): boolean {
+    return this.walkReady;
+  }
+
+  /** Vrai si le point est sur une surface où une foule peut se tenir (rue, place, parc), hors bâtiment. */
+  isWalkable(x: number, y: number): boolean {
+    const c = Math.floor((x - this.minX) / this.res);
+    const r = Math.floor((y - this.minY) / this.res);
+    if (c < 0 || r < 0 || c >= this.cols || r >= this.rows) return false;
+    const i = r * this.cols + c;
+    return this.data[i] !== 1 && (!this.walkReady || this.walk[i] === 1);
   }
 
   /** Libère les cellules d'un couloir (segment élargi de `half` m) : passage souterrain ou couvert sous un bâtiment. */
