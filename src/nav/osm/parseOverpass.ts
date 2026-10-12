@@ -38,6 +38,7 @@ export function parseOverpass(json: unknown): OsmData {
   const ways: OsmWay[] = [];
   const poiNodes: OsmTaggedNode[] = [];
   let relations = 0;
+  const synth = { nextNode: -1, nextWay: -1, byCoord: new Map<string, number>() };
   for (const el of (json as { elements: unknown[] }).elements) {
     if (!el || typeof el !== 'object') continue;
     const e = el as Record<string, unknown>;
@@ -60,7 +61,69 @@ export function parseOverpass(json: unknown): OsmData {
         for (const [k, v] of Object.entries(e.tags as Record<string, unknown>)) if (typeof v === 'string') tags[k] = v;
       }
       ways.push({ id: e.id, nodes: ids, tags });
-    } else if (e.type === 'relation') relations++;
+    } else if (e.type === 'relation') {
+      // multipolygones (grandes places, parcs, bâtiments à cour) : anneaux extérieurs assemblés depuis `out geom`
+      const made = relationToWays(e, nodes, synth);
+      if (made.length) ways.push(...made);
+      else relations++;
+    }
   }
   return { nodes, poiNodes, ways, skipped: { relations } };
+}
+
+
+interface SynthState {
+  nextNode: number;
+  nextWay: number;
+  byCoord: Map<string, number>;
+}
+
+type Pt = { lat: number; lon: number };
+
+/**
+ * Convertit une relation `type=multipolygon` (réponse `out geom`) en chemins fermés synthétiques : chaque anneau extérieur
+ * devient un chemin portant les étiquettes de la relation (les trous ne sont pas gérés). Retourne [] si la relation n'est
+ * pas exploitable (sans géométrie, anneau non fermé…).
+ */
+function relationToWays(e: Record<string, unknown>, nodes: Map<number, OsmNode>, st: SynthState): OsmWay[] {
+  if (!e.tags || typeof e.tags !== 'object' || !Array.isArray(e.members)) return [];
+  const tags: Tags = {};
+  for (const [k, v] of Object.entries(e.tags as Record<string, unknown>)) if (typeof v === 'string') tags[k] = v;
+  if (tags.type !== 'multipolygon' && tags.type !== 'boundary') return [];
+  const segs: Pt[][] = [];
+  for (const m of e.members as Array<Record<string, unknown>>) {
+    if (m.type !== 'way' || (m.role !== 'outer' && m.role !== '') || !Array.isArray(m.geometry)) continue;
+    const g = (m.geometry as Array<Pt | null>).filter((p): p is Pt => !!p && typeof p.lat === 'number' && typeof p.lon === 'number');
+    if (g.length >= 2) segs.push(g);
+  }
+  const key = (p: Pt) => `${p.lat},${p.lon}`;
+  const rings: Pt[][] = [];
+  const pool = segs.slice();
+  while (pool.length) {
+    let ring = (pool.shift() as Pt[]).slice();
+    let guard = pool.length + 1;
+    while (key(ring[0] as Pt) !== key(ring[ring.length - 1] as Pt) && guard-- > 0) {
+      const end = key(ring[ring.length - 1] as Pt);
+      const i = pool.findIndex((s) => key(s[0] as Pt) === end || key(s[s.length - 1] as Pt) === end);
+      if (i < 0) break;
+      const nxt = pool.splice(i, 1)[0] as Pt[];
+      ring = ring.concat(key(nxt[0] as Pt) === end ? nxt.slice(1) : nxt.slice().reverse().slice(1));
+    }
+    if (ring.length >= 4 && key(ring[0] as Pt) === key(ring[ring.length - 1] as Pt)) rings.push(ring);
+  }
+  const out: OsmWay[] = [];
+  for (const ring of rings) {
+    const ids = ring.map((p) => {
+      const k = key(p);
+      let id = st.byCoord.get(k);
+      if (id === undefined) {
+        id = st.nextNode--;
+        st.byCoord.set(k, id);
+        nodes.set(id, { lat: p.lat, lon: p.lon });
+      }
+      return id;
+    });
+    out.push({ id: st.nextWay--, nodes: ids, tags });
+  }
+  return out;
 }

@@ -50,3 +50,39 @@ describe('rassemblement : remplissage par distance de marche (pas d’anneau aut
     }
   });
 });
+
+describe('rassemblement à côté d’une place', () => {
+  it('une foule dont l’ancre est dans la rue déborde sur la place voisine (espace ouvert) au lieu de s’entasser dans la rue', async () => {
+    const { gridGraph } = await import('./navHelpers');
+    const { Sim } = await import('../../src/engine/sim');
+    const { anchorAt, PLAN } = await import('./engineHelpers');
+    const place = { id: 'p', kind: 'square' as const, ring: new Float32Array([-60, 3, 60, 3, 60, 80, -60, 80]), source: 'osm' as const };
+    const g = gridGraph({ cols: 5, rows: 1, spacing: 100, width: 8, spaces: [place] });
+    const sim = new Sim({ graph: g, seed: 1 });
+    const grp = sim.group(sim.createGroup({ label: 'Rassemblement', kind: 'static', size: 1500, origin: { x: 0, y: 0 }, anchor: anchorAt({ x: 0, y: 0 }, 'rue', 15) }, PLAN))!;
+    sim.run(600);
+    const m = grp.members;
+    let onPlace = 0;
+    for (let i = m.activeStart; i < m.n; i++) if ((m.y[i] as number) > 6 && Math.abs(m.x[i] as number) < 60 && (m.y[i] as number) < 80) onPlace++;
+    expect(onPlace / (m.n - m.activeStart)).toBeGreaterThan(0.3);
+  }, 60_000);
+
+  it('même chose quand un trottoir de quelques mètres sépare la place de la chaussée (écart comblé), mais pas à 15 m', async () => {
+    const { gridGraph } = await import('./navHelpers');
+    const { Sim } = await import('../../src/engine/sim');
+    const { anchorAt, PLAN } = await import('./engineHelpers');
+    const share = async (gapY: number) => {
+      const place = { id: 'p', kind: 'square' as const, ring: new Float32Array([-60, gapY, 60, gapY, 60, gapY + 80, -60, gapY + 80]), source: 'osm' as const };
+      const g = gridGraph({ cols: 5, rows: 1, spacing: 100, width: 8, spaces: [place] });
+      const sim = new Sim({ graph: g, seed: 1 });
+      const grp = sim.group(sim.createGroup({ label: 'Rassemblement', kind: 'static', size: 1500, origin: { x: 0, y: 0 }, anchor: anchorAt({ x: 0, y: 0 }, 'rue', 15) }, PLAN))!;
+      sim.run(600);
+      const m = grp.members;
+      let on = 0;
+      for (let i = m.activeStart; i < m.n; i++) if ((m.y[i] as number) >= gapY && Math.abs(m.x[i] as number) < 60) on++;
+      return on / (m.n - m.activeStart);
+    };
+    expect(await share(8)).toBeGreaterThan(0.25); // 4 m de trottoir entre la chaussée (±4) et la place
+    expect(await share(30)).toBeLessThan(0.02); // place trop éloignée : non reliée
+  }, 90_000);
+});

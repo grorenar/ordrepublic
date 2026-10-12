@@ -67,14 +67,15 @@ describe('paquet de ville : sérialisation', () => {
 });
 
 describe('requête Overpass : bornée et sobre', () => {
-  it('une seule requête avec emprise, délai d’attente, sortie JSON ; relations non demandées ; bâtiments optionnels', () => {
+  it('une seule requête avec emprise, délai d’attente, sortie JSON ; multipolygones demandés avec leur géométrie ; bâtiments optionnels', () => {
     const b = bboxAround(city.center);
     const q = overpassQuery(b);
     expect(q).toContain('[out:json][timeout:90]');
     expect(q).toContain(`${b.south.toFixed(6)},${b.west.toFixed(6)},${b.north.toFixed(6)},${b.east.toFixed(6)}`);
     expect(q).toContain('way["highway"]');
     expect(q).toContain('way["building"]');
-    expect(q).not.toContain('relation');
+    expect(q).toContain('relation["type"="multipolygon"]["place"="square"]');
+    expect(q).toContain('out geom;');
     expect(overpassQuery(b, { buildings: false })).not.toContain('building');
   });
   it('l’emprise par défaut d’une ville reste sous le plafond ; une emprise trop grande est refusée', () => {

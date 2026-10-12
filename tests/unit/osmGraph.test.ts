@@ -207,3 +207,66 @@ describe('voies de bus en site propre (BHNS, ex. Mettis)', () => {
     expect(g2.edgeCount).toBe(1);
   });
 });
+
+describe('multipolygones (grandes places, parcs, bâtiments à cour)', () => {
+  const O = { lng: 6.1757, lat: 49.1193 };
+  const d = 0.0006;
+  const pt = (x: number, y: number) => ({ lat: O.lat + y * d, lon: O.lng + x * d });
+  const street = (id: number, a: [number, number], b: [number, number]) => [
+    { type: 'node', id: id * 10, ...pt(...a) },
+    { type: 'node', id: id * 10 + 1, ...pt(...b) },
+    { type: 'way', id, nodes: [id * 10, id * 10 + 1], tags: { highway: 'residential' } },
+  ];
+  const base = [...street(1, [-1, 0], [1, 0]), ...street(2, [1, 0], [1, 1]), ...street(3, [-1, 1], [1, 1]), ...street(4, [-1, 0], [-1, 1]), ...street(5, [1, 1], [2, 1])];
+  const square = (tags: Record<string, string>, split = true) => ({
+    type: 'relation',
+    id: 900,
+    tags: { type: 'multipolygon', ...tags },
+    members: split
+      ? [
+          { type: 'way', ref: 1, role: 'outer', geometry: [pt(-0.8, 0.1), pt(0.8, 0.1), pt(0.8, 0.9)] },
+          { type: 'way', ref: 2, role: 'outer', geometry: [pt(-0.8, 0.9), pt(0.8, 0.9)].reverse().concat([pt(-0.8, 0.1)]).reverse() },
+        ]
+      : [{ type: 'way', ref: 1, role: 'outer', geometry: [pt(-0.8, 0.1), pt(0.8, 0.1), pt(0.8, 0.9)] }],
+  });
+
+  it('une place cartographiée en multipolygone (anneau en deux chemins, sens quelconque) devient un espace ouvert', () => {
+    const json = { elements: [...base, square({ place: 'square', name: 'Place de la République' })] };
+    const g = buildGraphFromOverpassJson(json, { origin: O }).graph;
+    expect(g.spaces.length).toBe(1);
+    expect(g.spaces[0]).toMatchObject({ kind: 'square', name: 'Place de la République', source: 'osm' });
+    expect(g.spaces[0]!.ring.length / 2).toBeGreaterThanOrEqual(4);
+  });
+
+  it('un bâtiment multipolygone devient un obstacle ; un anneau non fermé est ignoré (comptée comme relation ignorée)', () => {
+    const b = buildGraphFromOverpassJson({ elements: [...base, square({ building: 'yes' })] }, { origin: O });
+    expect(b.graph.obstacles.length).toBe(1);
+    const open = buildGraphFromOverpassJson({ elements: [...base, square({ place: 'square' }, false)] }, { origin: O });
+    expect(open.graph.spaces.length).toBe(0);
+    expect(open.report.relationsSkipped).toBe(1);
+  });
+
+  it('la requête Overpass demande les multipolygones avec leur géométrie', () => {
+    const q = overpassQuery({ south: 49, west: 6, north: 49.01, east: 6.01 });
+    expect(q).toContain('relation["type"="multipolygon"]["place"="square"]');
+    expect(q).toContain('out geom;');
+  });
+
+  it('un cortège dont l’arrivée est sur cette place s’y rassemble (la place est praticable)', async () => {
+    const { Sim } = await import('../../src/engine/sim');
+    const json = { elements: [...base, square({ place: 'square', name: 'Place de la République' })] };
+    const g = buildGraphFromOverpassJson(json, { origin: O }).graph;
+    const sim = new Sim({ graph: g, seed: 1 });
+    const sp = g.spaces[0]!;
+    let cx = 0;
+    let cy = 0;
+    for (let i = 0; i < sp.ring.length; i += 2) {
+      cx += sp.ring[i] as number;
+      cy += sp.ring[i + 1] as number;
+    }
+    cx /= sp.ring.length / 2;
+    cy /= sp.ring.length / 2;
+    expect(sim.mask!.isOpen(cx, cy)).toBe(true);
+    expect(sim.mask!.isBlocked(cx, cy)).toBe(false);
+  });
+});

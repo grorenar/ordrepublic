@@ -46,7 +46,8 @@ export function checkBboxSafety(b: Bbox, maxKm2 = MAX_QUERY_AREA_KM2): void {
 
 /**
  * Requête Overpass unique et bornée : voies, places, parcs et (optionnellement) bâtiments de l'emprise.
- * Les relations (multipolygones) ne sont pas demandées : elles ne sont pas gérées par le constructeur de graphe.
+ * Les multipolygones (grandes places, parcs, bâtiments à cour) sont demandés avec leur géométrie (`out geom`) et leurs anneaux
+ * extérieurs assemblés à la lecture : une place cartographiée ainsi serait sinon absente du jeu.
  */
 export function overpassQuery(b: Bbox, o: { buildings?: boolean; timeoutS?: number; pois?: boolean } = {}): string {
   const bb = `${b.south.toFixed(6)},${b.west.toFixed(6)},${b.north.toFixed(6)},${b.east.toFixed(6)}`;
@@ -64,7 +65,13 @@ export function overpassQuery(b: Bbox, o: { buildings?: boolean; timeoutS?: numb
     parts.push(`node["shop"](${bb});`, `way["shop"](${bb});`, `node["amenity"~"${POI_AMENITY_REGEX}"](${bb});`, `way["amenity"~"${POI_AMENITY_REGEX}"](${bb});`, `node["office"](${bb});`);
   }
   if (o.buildings !== false) parts.push(`way["building"](${bb});`);
-  return `[out:json][timeout:${o.timeoutS ?? 90}];\n(\n  ${parts.join('\n  ')}\n);\n(._;>;);\nout body qt;`;
+  const rels = [
+    `relation["type"="multipolygon"]["place"="square"](${bb});`,
+    `relation["type"="multipolygon"]["highway"="pedestrian"](${bb});`,
+    `relation["type"="multipolygon"]["leisure"~"^(park|garden|common)$"](${bb});`,
+  ];
+  if (o.buildings !== false) rels.push(`relation["type"="multipolygon"]["building"](${bb});`);
+  return `[out:json][timeout:${o.timeoutS ?? 90}];\n(\n  ${parts.join('\n  ')}\n);\n(._;>;);\nout body qt;\n(\n  ${rels.join('\n  ')}\n);\nout geom;`;
 }
 
 export function licenseText(city: CitySpec, generatedAt: string): string {

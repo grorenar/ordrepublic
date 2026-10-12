@@ -117,8 +117,57 @@ export class WalkMask {
         if (i === a + 1) this.fillDisk(x0, y0, Math.max(l, r));
       }
     }
+    // cellules de rue seules (avant d'ajouter les espaces ouverts) : sert à combler les petits écarts place ↔ rue
+    const street = Uint8Array.from(this.walk);
     for (const sp of g.spaces) this.rasterize({ ring: sp.ring }, this.walk, 1);
+    this.bridgeGaps(street, WalkMask.GAP_BRIDGE_M);
     this.walkReady = true;
+  }
+
+  /** Écart maximal (m) comblé entre une rue et un espace ouvert voisin (trottoir, bordure, rangée de potelets) : sans cela une place cartographiée à quelques mètres de la chaussée serait inaccessible. */
+  static readonly GAP_BRIDGE_M = 6;
+
+  /** Rend praticables les cellules libres (hors bâtiment) situées à la fois près d'un espace ouvert et près d'une rue. */
+  private bridgeGaps(street: Uint8Array, bridgeM: number): void {
+    const k = Math.max(1, Math.round(bridgeM / this.res));
+    const near = (src: Uint8Array): Uint8Array => {
+      const { cols, rows } = this;
+      const tmp = new Uint8Array(cols * rows);
+      const out = new Uint8Array(cols * rows);
+      for (let r = 0; r < rows; r++) {
+        let last = -1e9;
+        const row = r * cols;
+        // passe avant : dernière cellule occupée à gauche
+        for (let c = 0; c < cols; c++) {
+          if (src[row + c]) last = c;
+          if (c - last <= k) tmp[row + c] = 1;
+        }
+        last = 1e9;
+        for (let c = cols - 1; c >= 0; c--) {
+          if (src[row + c]) last = c;
+          if (last - c <= k) tmp[row + c] = 1;
+        }
+      }
+      for (let c = 0; c < cols; c++) {
+        let last = -1e9;
+        for (let r = 0; r < rows; r++) {
+          if (tmp[r * cols + c]) last = r;
+          if (r - last <= k) out[r * cols + c] = 1;
+        }
+        last = 1e9;
+        for (let r = rows - 1; r >= 0; r--) {
+          if (tmp[r * cols + c]) last = r;
+          if (last - r <= k) out[r * cols + c] = 1;
+        }
+      }
+      return out;
+    };
+    let anyOpen = false;
+    for (let i = 0; i < this.open.length && !anyOpen; i++) if (this.open[i]) anyOpen = true;
+    if (!anyOpen) return;
+    const nearOpen = near(this.open);
+    const nearStreet = near(street);
+    for (let i = 0; i < this.walk.length; i++) if (!this.walk[i] && nearOpen[i] && nearStreet[i] && this.data[i] !== 1) this.walk[i] = 1;
   }
 
   private fillDisk(x: number, y: number, rad: number): void {

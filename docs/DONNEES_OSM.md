@@ -82,3 +82,9 @@ Dans OSM, deux voies voisines (chaussées séparées d'un terre-plein, voie de b
 - seulement si le trajet existant est au moins 3 × l'écart + 60 m (pas de liaison redondante avec un carrefour proche) ;
 - espacées d'au moins 45 m sur une même voie, à plus de 5 m d'un carrefour ; les voies sont coupées aux points de liaison (longueurs, classes et noms conservés).
 Les paramètres sont `DEFAULT_LINK_OPTIONS`. Déterministe ; environ 1 s pour plusieurs milliers d'arêtes. Le rapport de construction indique `pedestrianLinks`. Option `links: false` pour désactiver. Les paquets de ville déjà générés n'en contiennent pas : à régénérer, ou chargement à la demande (déjà inclus).
+
+## Places et parcs cartographiés en multipolygone, et accès à la place
+
+- Les **multipolygones** (`type=multipolygon`) de places (`place=square`), zones piétonnes (`highway=pedestrian`), parcs/jardins et bâtiments sont maintenant demandés à Overpass avec leur géométrie (`out geom`) ; leurs anneaux extérieurs sont assemblés à la lecture (trous non gérés). Une grande place cartographiée ainsi (cas fréquent) était auparavant **absente du jeu** : la foule s'amassait dans la rue voisine, ses cellules n'étant pas praticables.
+- Un **petit écart** (≤ 6 m : trottoir, bordure, rangée de potelets) entre une rue et un espace ouvert voisin est comblé (`WalkMask.GAP_BRIDGE_M`) : la place est accessible depuis la rue.
+- Une place **non cartographiée du tout** reste inaccessible aux rassemblements (le jeu ne marche que sur du sol connu : rues, places, parcs). Si une place de votre secteur est absente, indiquez-moi ses étiquettes OSM.
