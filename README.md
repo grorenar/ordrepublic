@@ -20,7 +20,15 @@ npm run build        # vérification des types + build statique dans dist/
 npm run preview      # sert dist/ sur http://localhost:4173
 ```
 
-Aucun serveur applicatif : `dist/` est un site statique (à servir par HTTP, pas via `file://`).
+Aucun serveur applicatif : `dist/` est un site statique (à servir par HTTP, pas via `file://`). Les chemins sont relatifs (`base: './'`) :
+le site fonctionne à la racine comme dans un sous-répertoire.
+
+### Publication sur GitHub Pages
+
+Le workflow `.github/workflows/pages.yml` compile l'application (typecheck, tests, build) et publie `dist/`.
+**Réglage à faire une fois** : *Settings → Pages → Build and deployment → Source = « GitHub Actions »*.
+Avec la source « Deploy from a branch », Pages publie le code source brut (`index.html` → `src/main.tsx`) et la page reste blanche.
+Si le déploiement est refusé, vérifier *Settings → Environments → github-pages → Deployment branches* (autoriser la branche déployée).
 
 ### Tests
 

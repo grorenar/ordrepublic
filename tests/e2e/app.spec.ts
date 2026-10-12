@@ -1,6 +1,21 @@
 import { expect, test } from '@playwright/test';
 import { alignmentErrors, mapBox, openGame, pauseSim, simTimeMs, targets, view } from './helpers';
 
+test.describe('démarrage et erreurs visibles (jamais de page blanche)', () => {
+  test('le build utilise des chemins relatifs (publication en sous-répertoire)', async ({ request }) => {
+    const html = await (await request.get('/')).text();
+    expect(html).toMatch(/src="\.\/assets\/index-[^"]+\.js"/);
+    expect(html).not.toMatch(/(src|href)="\/assets\//);
+  });
+
+  test('script principal introuvable : un message d’erreur explicite s’affiche', async ({ page }) => {
+    await page.route('**/assets/index-*.js', (route) => route.abort('failed'));
+    await page.goto('/');
+    await expect(page.locator('#boot-status')).toContainText('n’a pas pu démarrer', { timeout: 5000 });
+    await expect(page.locator('#boot-status')).toContainText('Ressource introuvable');
+  });
+});
+
 test.describe('écran d’accueil', () => {
   test('propose les 4 villes, démarre une démonstration sur la ville choisie', async ({ page }) => {
     await page.goto('/?debug&map=schematic');

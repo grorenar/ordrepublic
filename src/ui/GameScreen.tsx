@@ -71,6 +71,7 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
   const [ctrl, setCtrl] = useState<GameController | null>(null);
   const [, setRev] = useState(0);
   const [banners, setBanners] = useState<Banner[]>([]);
+  const [fatal, setFatal] = useState<string | null>(null);
 
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -96,6 +97,7 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
   useEffect(() => {
     let cancelled = false;
     setCtrl(null);
+    setFatal(null);
     setBanners([]);
     setOrderMode(false);
     // fournisseur de test local (debug) : le fond n'est pas une carte réelle, on simule sur le graphe schématique
@@ -107,8 +109,13 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
         setMapKind(w.kind);
         return;
       }
-      const c = new GameController({ graph: w.graph, zoneLevel });
-      setCtrl(c);
+      try {
+        setCtrl(new GameController({ graph: w.graph, zoneLevel }));
+      } catch (err) {
+        setFatal(`Initialisation du moteur impossible : ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }).catch((err: unknown) => {
+      if (!cancelled) setFatal(`Chargement du monde impossible : ${err instanceof Error ? err.message : String(err)}`);
     });
     return () => {
       cancelled = true;
@@ -424,7 +431,16 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
             </button>
             <strong>ORDRE PUBLIC</strong>
           </div>
-          <span class="muted">Préparation de la simulation…</span>
+          {fatal ? (
+            <span class="warn" role="alert" data-testid="engine-error">
+              {fatal}{' '}
+              <button type="button" onClick={() => { setFatal(null); setMapKind('schematic'); setCity({ ...city }); }}>
+                Réessayer en fond schématique
+              </button>
+            </span>
+          ) : (
+            <span class="muted">Préparation de la simulation…</span>
+          )}
         </header>
       )}
       {searchOpen && (
@@ -446,7 +462,7 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
           ))}
         </div>
 
-        {(notice || mapStatus.state === 'loading' || loadingWorld) && (
+        {(notice || mapStatus.state === 'loading' || (loadingWorld && !fatal)) && (
           <div class={`map-notice map-ui ${notice?.level ?? 'info'}`} role="status" data-testid="map-notice">
             <span>{notice ? notice.text : loadingWorld ? 'Préparation de la simulation…' : 'Chargement de la carte…'}</span>
             {notice && mapKind === 'schematic' && (

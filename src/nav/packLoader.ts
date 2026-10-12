@@ -11,7 +11,7 @@ export interface LoadedPack {
  * Retourne null si aucun paquet n'existe (404) ; lève `PackError` si le fichier est invalide.
  * Aucun service externe : les fichiers sont servis par l'application elle-même.
  */
-export async function loadCityPack(cityId: string, fetchFn: typeof fetch = fetch.bind(globalThis), base = '/data/osm/'): Promise<LoadedPack | null> {
+export async function loadCityPack(cityId: string, fetchFn: typeof fetch = fetch.bind(globalThis), base = `${import.meta.env.BASE_URL}data/osm/`): Promise<LoadedPack | null> {
   const url = `${base}${cityId}.graph.json`;
   let res: Response;
   try {
