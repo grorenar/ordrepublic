@@ -8,6 +8,7 @@ import {
   type RawEdge,
   type StreetGraph,
 } from '../graph';
+import { addPedestrianLinks } from '../links';
 import { parseOverpass, type OsmData } from './parseOverpass';
 import { classifyHighway, classifyPoi, classifySpace, isAdministration, isBuilding, type ExclusionReason } from './tagsPolicy';
 
@@ -18,6 +19,8 @@ export interface BuildOptions {
   keep?: 'largest' | 'all';
   osmTimestamp?: string;
   label?: string;
+  /** Ajouter les liaisons piétonnes entre voies adjacentes sans bâtiment (défaut oui). */
+  links?: boolean;
 }
 
 export interface BuildReport {
@@ -30,6 +33,8 @@ export interface BuildReport {
   components: number;
   droppedEdges: number;
   widthDefaultedShare: number;
+  /** Liaisons piétonnes ajoutées entre voies adjacentes. */
+  pedestrianLinks: number;
   spaces: number;
   obstacles: number;
   relationsSkipped: number;
@@ -201,6 +206,13 @@ export function buildGraphFromOsm(data: OsmData, opts: BuildOptions = {}): { gra
     graph = buildGraph({ origin, nodes: nn, edges: re, spaces, obstacles, pois, provenance: graph.provenance });
   }
 
+  let pedestrianLinks = 0;
+  if (opts.links !== false && graph.edgeCount > 1) {
+    const r = addPedestrianLinks(graph);
+    graph = r.graph;
+    pedestrianLinks = r.added;
+  }
+
   let lengthM = 0;
   for (let e = 0; e < graph.edgeCount; e++) lengthM += graph.edgeLen[e] as number;
   const bw = graph.bounds.maxX - graph.bounds.minX;
@@ -224,6 +236,7 @@ export function buildGraphFromOsm(data: OsmData, opts: BuildOptions = {}): { gra
       components: sizes.length,
       droppedEdges: dropped,
       widthDefaultedShare: edges.length ? defaulted / edges.length : 0,
+      pedestrianLinks,
       spaces: spaces.length,
       obstacles: obstacles.length,
       relationsSkipped: data.skipped.relations,

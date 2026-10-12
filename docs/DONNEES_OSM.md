@@ -74,3 +74,11 @@ Puis, dans le jeu, choisir la ville avec le fond « Carte OpenStreetMap » : **l
 ## Voies de bus en site propre (BHNS, ex. Mettis à Metz)
 
 Retenues comme classe `Busway` : `highway=busway`, `highway=service` + `service=busway|bus`, ou voie fermée (`access=no`) réservée aux bus (`bus=designated`, `psv=designated`). Praticables **à pied** par un cortège (l'interdiction légale n'empêche pas matériellement de s'y engager), non ouvertes à la circulation générale ; les véhicules **avec avertisseurs** peuvent les emprunter **à vitesse d'artère** (6,5 m/s de base × facteur d'urgence, plafonné) : ces voies accueillent des bus de plusieurs tonnes et sont donc larges (largeur par défaut 8 m, minimum 4 m pour un véhicule). Les véhicules sans avertisseurs n'y accèdent pas. Avant ce correctif elles étaient exclues du graphe (`excluded_class` / `no_access`), donc invisibles pour le moteur. Les couloirs de bus **dans** la chaussée d'une rue ordinaire font déjà partie de cette rue.
+
+## Liaisons piétonnes entre voies adjacentes
+
+Dans OSM, deux voies voisines (chaussées séparées d'un terre-plein, voie de bus le long d'une avenue…) ne sont reliées qu'à leurs carrefours. À pied, on passe pourtant de l'une à l'autre dès qu'**aucun bâtiment** ne les sépare. `addPedestrianLinks` (`src/nav/links.ts`, appelé à la construction du graphe OSM) ajoute donc des arêtes piétonnes courtes (3 m de large, aucune circulation) entre deux voies :
+- distantes de 3 à 24 m, **sans bâtiment** sur le segment (masque des bâtiments), ni tunnel ni pont ni escalier ;
+- seulement si le trajet existant est au moins 3 × l'écart + 60 m (pas de liaison redondante avec un carrefour proche) ;
+- espacées d'au moins 45 m sur une même voie, à plus de 5 m d'un carrefour ; les voies sont coupées aux points de liaison (longueurs, classes et noms conservés).
+Les paramètres sont `DEFAULT_LINK_OPTIONS`. Déterministe ; environ 1 s pour plusieurs milliers d'arêtes. Le rapport de construction indique `pedestrianLinks`. Option `links: false` pour désactiver. Les paquets de ville déjà générés n'en contiennent pas : à régénérer, ou chargement à la demande (déjà inclus).
