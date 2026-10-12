@@ -78,7 +78,7 @@ describe('cortège mobile', () => {
     for (let i = 0; i < 3000; i++) {
       sim.step();
       expect(g.sCentre).toBeGreaterThanOrEqual(last);
-      expect(g.speedMps).toBeLessThanOrEqual(1.1 + 1e-9);
+      expect(g.speedMps).toBeLessThanOrEqual(1.1 * 1.1 + 1e-9); // vitesse de base × facteur de type de rue maximal (grand axe ×1,1)
       last = g.sCentre;
     }
     expect(g.sCentre).toBeGreaterThan(200);
@@ -113,7 +113,7 @@ describe('cortège mobile', () => {
     const narrow = gridGraph({ cols: 6, rows: 1, spacing: 100, width: 5 });
     const wide = gridGraph({ cols: 6, rows: 1, spacing: 100, width: 14 });
     const L = (graph: typeof wide) => {
-      const sim = new Sim({ graph, seed: 1, mask: null });
+      const sim = new Sim({ graph, seed: 1, mask: null, params: { sidewalkAllowanceM: 0 } });
       const g = sim.group(sim.createGroup({ label: 'c', kind: 'march', size: 3000, origin: { x: -250, y: 0 }, plan: { destination: anchorAt({ x: 250, y: 0 }), waypoints: [], onArrival: 'settle', patienceMs: 0 } }, PLAN))!;
       return g.columnLength;
     };
@@ -375,13 +375,13 @@ describe('états de rue produits par la simulation', () => {
   it('un cortège ralentit s’il traverse une rue occupée par une autre foule', () => {
     const graph = gridGraph({ cols: 8, rows: 1, spacing: 100, width: 30 });
     const run = (withCrowd: boolean) => {
-      const sim = new Sim({ graph, seed: 1, mask: null });
+      const sim = new Sim({ graph, seed: 1, mask: null, params: { sidewalkAllowanceM: 0 } });
       if (withCrowd) sim.createGroup({ label: 'Autre foule', kind: 'static', size: 1000, origin: { x: 100, y: 0 }, anchor: anchorAt({ x: 100, y: 0 }) }, PLAN);
       const g = sim.group(sim.createGroup({ label: 'c', kind: 'march', size: 300, origin: { x: -340, y: 0 }, plan: { destination: anchorAt({ x: 340, y: 0 }), waypoints: [], onArrival: 'settle', patienceMs: 0 } }, PLAN))!;
       let minSpeed = Infinity;
       for (let i = 0; i < 4500; i++) {
         sim.step();
-        if (i > 20 && g.phase === 'moving') minSpeed = Math.min(minSpeed, g.speedMps);
+        if (i > 120 && g.phase === 'moving') minSpeed = Math.min(minSpeed, g.speedMps);
       }
       return { minSpeed, cause: g.speedCause };
     };

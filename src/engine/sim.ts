@@ -14,6 +14,8 @@ import {
   type StreetCounts,
 } from '../nav/streetState';
 import { WalkMask } from '../nav/walkMask';
+import { computeWalkWidths } from '../nav/walkWidth';
+import { EdgeClass } from '../nav/graph';
 import { createLayout, extendLayout, snapToWalkable } from './layout';
 import { levelFor, distanceToFoci, selectBlockLevels, usesBlocks } from './lod';
 import { Journal, pushHistory } from './journal';
@@ -125,6 +127,7 @@ export class Sim {
     this.state = createEdgeState(o.graph);
     this.nav = new NavContext(o.graph, this.params.nav, this.state);
     this.mask = o.mask === undefined ? WalkMask.fromGraph(o.graph, this.params.walkMaskResolutionM) : o.mask;
+    this.state.walkWidth.set(computeWalkWidths(o.graph, this.mask, { maxM: this.params.walkWidthMaxM, sampleEveryM: this.params.walkWidthSampleEveryM, sidewalkAllowanceM: this.params.sidewalkAllowanceM }));
     this.rng = new Rng(hash32(this.seed, 0xabcdef));
     this.timeline = [...(o.timeline ?? [])].sort((a, b) => a.atMs - b.atMs || (a.id < b.id ? -1 : 1));
     this.zone = o.zone;
@@ -285,7 +288,7 @@ export class Sim {
   }
 
   private motionCtx(): MotionCtx {
-    return { graph: this.graph, params: this.params, mask: this.mask, tick: this.tick, tMs: this.timeMs };
+    return { graph: this.graph, params: this.params, mask: this.mask, walk: this.state.walkWidth, tick: this.tick, tMs: this.timeMs };
   }
 
   /** Réévalue les positions d'un groupe quel que soit son niveau (sélection, affichage d'un groupe en N0). */
@@ -419,19 +422,19 @@ export class Sim {
     return { route: parts.length === 1 ? (parts[0] as Route) : joinRoutes(parts), waypointS };
   }
 
-  private columnGeometry(g: CrowdGroup, n: number): { width: number; length: number } {
+  private columnGeometry(g: CrowdGroup, n: number, density = this.params.marchDensity): { width: number; length: number } {
     const p = this.params;
     const route = g.route as Route;
     const L0 = g.columnLength || 1;
     const s0 = Math.max(0, g.sCentre - L0 / 2);
     const s1 = Math.min(route.length, g.sCentre + L0 / 2);
     // un petit groupe forme un bloc compact : largeur de front ≈ √(effectif / densité), bornée
-    let w = Math.max(p.marchFrontWidthMinM, Math.min(p.marchFrontWidthMaxM, Math.sqrt(n / p.marchDensity)));
+    let w = Math.max(p.marchFrontWidthMinM, Math.min(p.marchFrontWidthMaxM, Math.sqrt(n / density)));
     const i0 = edgeIndexAt(route, s0);
     const i1 = edgeIndexAt(route, s1);
-    for (let i = i0; i <= i1; i++) w = Math.min(w, (this.graph.edgeWidth[route.edges[i] as number] as number) - 2 * p.streetMarginM);
+    for (let i = i0; i <= i1; i++) w = Math.min(w, (this.state.walkWidth[route.edges[i] as number] as number) - 2 * p.streetMarginM);
     w = Math.max(1, w);
-    return { width: w, length: Math.max(1, n / (p.marchDensity * w)) };
+    return { width: w, length: Math.max(1, n / (density * w)) };
   }
 
   private planMarch(g: CrowdGroup, origin: Vec2, cause: Cause): void {
@@ -697,8 +700,9 @@ export class Sim {
 
     // vitesse
     if (g.phase === 'waiting') {
-      g.speedMps = 0;
-      g.speedCause = 'attente : aucun itinéraire';
+      g.speedMps = Math.max(0, g.speedMps - 3 * p.crowdAccelMps2 * dt);
+      g.sCentre += g.speedMps * dt;
+      g.speedCause = g.speedMps > 0.05 ? 'arrêt : aucun itinéraire' : 'attente : aucun itinéraire';
       if (g.plan.patienceMs > 0 && g.waitingSinceMs !== null && this.timeMs - g.waitingSinceMs > g.plan.patienceMs && !g.patienceReported) {
         g.patienceReported = true;
         this.log('alert', 'group.patience_exceeded', `${g.label} : attente prolongée (${Math.round((this.timeMs - g.waitingSinceMs) / 1000)} s) sans itinéraire.`, { kind: 'rule', refId: g.id, note: 'patience du groupe dépassée' }, { type: 'group', id: g.id });
@@ -714,6 +718,14 @@ export class Sim {
       const geo = this.columnGeometry(g, n);
       g.frontWidth += Math.max(-5 * dt, Math.min(5 * dt, geo.width - g.frontWidth));
       g.columnLength += Math.max(-p.columnLengthRateMps * dt, Math.min(p.columnLengthRateMps * dt, geo.length - g.columnLength));
+    } else if (g.phase === 'waiting' && !arriving) {
+      // bloqué : la colonne se tasse en bloc contre l'obstacle (densité d'attente, toute la largeur praticable),
+      // la TÊTE restant en place — comme un piquet, pas une file étirée
+      const head = g.sCentre + g.columnLength / 2;
+      const geo = this.columnGeometry(g, n, Math.max(p.waitDensity, p.marchDensity));
+      g.frontWidth += Math.max(-5 * dt, Math.min(5 * dt, geo.width - g.frontWidth));
+      g.columnLength += Math.max(-p.columnLengthRateMps * dt, Math.min(p.columnLengthRateMps * dt, geo.length - g.columnLength));
+      g.sCentre = head - g.columnLength / 2;
     }
 
     // arrivée : la tête atteint la fin de la route ; les individus s'absorbent un à un
@@ -725,13 +737,32 @@ export class Sim {
 
   private computeSpeed(g: CrowdGroup): void {
     const p = this.params;
+    const dt = p.tickMs / 1000;
     const v0 = g.speedOverride ?? (g.kind === 'secondary' ? p.speedByKind.secondary : p.speedByKind.march);
     const widthF = Math.max(p.narrowStreetMinFactor, Math.min(1, g.frontWidth / p.referenceStreetWidthM));
-    const cohF = 0.6 + 0.4 * (g.cohesion / 100);
+    const cohF = Math.min(1, 0.6 + 0.4 * (g.cohesion / 70)); // pleine vitesse à partir de 70 de cohésion
     const otherF = g.otherCrowdFactor;
-    const f = Math.min(widthF, cohF, otherF);
-    g.speedMps = v0 * f;
-    g.speedCause = f >= 0.999 ? 'libre' : f === otherF ? 'autre foule dense sur le trajet' : f === widthF ? 'rue étroite' : 'cohésion faible';
+    // type de rue : moyenne des facteurs sous le centre et sous la tête de la colonne
+    const route = g.route as Route;
+    const classAt = (s: number) => {
+      const e = route.edges[edgeIndexAt(route, Math.max(0, Math.min(route.length, s)))] as number;
+      const cls = this.graph.edgeClass[e] as number;
+      return { f: p.speedFactorByClass[cls] ?? 1, cls };
+    };
+    const c0 = classAt(g.sCentre);
+    const c1 = classAt(g.sCentre + g.columnLength / 2);
+    const classF = (c0.f + c1.f) / 2;
+    const f = Math.min(widthF, cohF, otherF) * classF;
+    // lissage : un cortège n'accélère ni ne freine instantanément (changement de type de rue, foule devant)
+    const target = v0 * f;
+    const dv = p.crowdAccelMps2 * dt;
+    g.speedMps = g.speedMps < target ? Math.min(target, g.speedMps + dv) : Math.max(target, g.speedMps - 2 * dv);
+    const limiting = Math.min(widthF, cohF, otherF);
+    const CLASS_NAME: Record<number, string> = { [EdgeClass.Steps]: 'escaliers', [EdgeClass.Path]: 'sentier', [EdgeClass.Footway]: 'chemin piéton', [EdgeClass.Service]: 'voie de service', [EdgeClass.Track]: 'piste', [EdgeClass.Primary]: 'grand axe' };
+    if (classF > 1.001 && limiting >= 0.999) g.speedCause = `type de rue : ${CLASS_NAME[c0.cls] ?? 'axe large'} (plus rapide)`;
+    else if (f >= 0.999 && classF >= 0.999) g.speedCause = 'libre';
+    else if (classF < limiting && classF < 0.999) g.speedCause = `type de rue : ${CLASS_NAME[c0.cls] ?? 'rue secondaire'}`;
+    else g.speedCause = limiting === otherF ? 'autre foule dense sur le trajet' : limiting === widthF ? 'rue étroite' : 'cohésion faible';
   }
 
   private beginArrival(g: CrowdGroup): void {
@@ -914,7 +945,7 @@ export class Sim {
         const other = (this.state.load[e] as number) - (mine.get(e) ?? 0);
         if (other <= 0) continue;
         const pres = (this.state.presence[e] as number) > 0 ? Math.max(1, this.state.presence[e] as number) : (this.graph.edgeLen[e] as number);
-        const rho = other / Math.max(1e-6, pres * (this.graph.edgeWidth[e] as number));
+        const rho = other / Math.max(1e-6, pres * (this.state.walkWidth[e] as number));
         factor = Math.min(factor, Math.max(p.minSpeedFactor, Math.min(1, 1 - rho / p.jamDensity)));
       }
       g.otherCrowdFactor = factor;

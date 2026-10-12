@@ -75,6 +75,9 @@ export class NavContext {
       if (mode === 'crowd') {
         if (cls === EdgeClass.Footway || cls === EdgeClass.Path) mult += p.crowdPenaltyFootway;
         else if (cls === EdgeClass.Steps) mult += p.crowdPenaltySteps;
+        // un cortège évite les rues étroites (largeur praticable mesurée), sans les interdire
+        const ww = this.state ? (this.state.walkWidth[e] as number) : (this.graph.edgeWidth[e] as number);
+        if (ww < p.crowdPreferredWidthM) mult += p.crowdNarrowPenalty * (1 - ww / p.crowdPreferredWidthM);
       }
     }
     if (dynamic && this.state) {

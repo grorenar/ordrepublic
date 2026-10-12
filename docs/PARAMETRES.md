@@ -19,6 +19,8 @@ Contrôles de cohérence appliqués à la création d’un `Sim` (`validateSimPa
 | `speedByKind.dispersing` | m/s | 1.2 | Vitesse de marche des personnes qui quittent un rassemblement. | Détermine la durée pendant laquelle un rassemblement se vide (avec la durée de dispersion du scénario). |
 | `referenceStreetWidthM` | m | 10 | Largeur de rue au-delà de laquelle la largeur ne ralentit plus un cortège. | Facteur de vitesse = largeur du front / cette valeur (plafonné à 1). |
 | `narrowStreetMinFactor` | sans unité (0–1) | 0.6 | Facteur de vitesse plancher dû à l’étroitesse de la rue. | Empêche un cortège de s’arrêter simplement parce que la rue est étroite. |
+| `speedFactorByClass.*` | multiple | 0: 1.1 · 1: 1.05 · 2: 1 · 3: 0.95 · 4: 0.95 · 5: 0.9 · 6: 0.8 · 7: 1 · 8: 0.85 · 9: 0.75 · 10: 0.5 · 11: 0.7 | Facteur de vitesse d’un cortège selon la classe de la voie (0 grand axe … 10 escaliers, 11 piste). | Un cortège accélère sur un boulevard (×1,1) et ralentit en ruelle (×0,8), sentier (×0,75), escaliers (×0,5). Moyenne des facteurs sous le centre et la tête de la colonne. |
+| `crowdAccelMps2` | m/s² | 0.35 | Accélération maximale d’un cortège (le freinage est deux fois plus fort). | Lisse les changements de vitesse (type de rue, foule devant) : pas de saut de vitesse. |
 
 ## Densités et géométrie
 
@@ -29,6 +31,10 @@ Contrôles de cohérence appliqués à la création d’un `Sim` (`validateSimPa
 | `marchFrontWidthMaxM` | m | 14 | Largeur maximale du front d’un cortège. | Un cortège plus large que la rue se réduit à la largeur disponible (moins marges) ; au-delà de cette valeur il s’allonge. |
 | `marchFrontWidthMinM` | m | 2 | Largeur minimale du front : un petit groupe forme un bloc compact. | Largeur du front = √(effectif / densité), bornée par ce minimum et le maximum. |
 | `arrivalZoneM` | m | 40 | Rayon autour d’une destination où un groupe (ou une unité à pied) peut traverser une foule dense pour la rejoindre. | Évite qu’un rassemblement existant ferme l’accès à sa propre place. Les véhicules ne traversent jamais une foule. |
+| `waitDensity` | personnes/m² | 3 | Densité d’un cortège arrêté et bloqué. | La colonne se tasse en bloc contre l’obstacle (longueur = effectif / (densité × largeur praticable)), tête immobile ; doit rester < nav.jamDensity. |
+| `walkWidthMaxM` | m | 24 | Largeur praticable maximale retenue pour une rue. | Plafonne la largeur mesurée façade à façade (places et rues très larges). |
+| `walkWidthSampleEveryM` | m | 10 | Intervalle entre points de mesure de la largeur praticable le long d’une rue. | Plus petit : mesure plus fine, calcul initial plus long. |
+| `sidewalkAllowanceM` | m | 2.5 | Trottoir supposé de chaque côté d’une rue ouverte aux véhicules quand aucun bâtiment ne permet de mesurer. | Largeur praticable = chaussée + 2 × trottoir. Sans effet quand les bâtiments sont connus (largeur mesurée façade à façade). |
 | `streetMarginM` | m | 0.8 | Marge entre un cortège et le bord de la rue. | Réduit la largeur utile du front (2 marges retirées de la largeur de rue). |
 | `columnLengthRateMps` | m/s | 4 | Vitesse maximale de variation de la longueur de colonne. | Lisse l’allongement/raccourcissement quand la largeur de rue change : aucun saut de position. |
 | `staticMaxRadiusM` | m | 2500 | Rayon maximal exploré pour placer un rassemblement statique. | Au-delà, la densité effective augmente (journalisé) ; borne le coût de mise en place. |
@@ -78,6 +84,8 @@ Contrôles de cohérence appliqués à la création d’un `Sim` (`validateSimPa
 | `walkMaskResolutionM` | m/cellule | 1 | Résolution du masque de marche (bâtiments rasterisés). | Précision du rejet des bâtiments ; mémoire ∝ 1/résolution². |
 | `nav.speedFootMps` | m/s | 1.4 | Vitesse piétonne nominale pour le calcul du coût d’itinéraire. | Coût en secondes ; n’influence pas la vitesse réelle des groupes. |
 | `nav.speedVehicleByClass.*` | m/s | 0: 8 · 1: 7 · 2: 6.5 · 3: 5.5 · 4: 5 · 5: 3 · 6: 3 | Vitesse nominale des véhicules par classe de voie (0 = interdit). | Préférence d’itinéraire des véhicules (grandes voies favorisées). |
+| `nav.crowdPreferredWidthM` | m | 8 | Largeur praticable en dessous de laquelle une rue est pénalisée pour un cortège. | Les cortèges préfèrent les rues larges ; une ruelle reste possible si c’est nécessaire. |
+| `nav.crowdNarrowPenalty` | multiple | 1.2 | Surcoût maximal (proportionnel au manque de largeur) pour un cortège dans une rue très étroite. | 0 : aucune préférence de largeur. |
 | `nav.crowdPenaltyFootway` | multiple | 0.5 | Surcoût pour un cortège empruntant un chemin piéton étroit. | Les cortèges préfèrent rues et places. |
 | `nav.crowdPenaltySteps` | multiple | 2 | Surcoût pour un cortège empruntant des escaliers. | Les cortèges évitent les escaliers sauf nécessité. |
 | `nav.maxDetourRatio` | ratio (∞ = aucun) | ∞ | Détour maximal accepté par rapport à l’itinéraire direct. | Infini par défaut : aucun facteur ne peut empêcher un itinéraire alternatif valide. |

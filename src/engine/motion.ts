@@ -17,6 +17,8 @@ export interface MotionCtx {
   graph: StreetGraph;
   params: SimParams;
   mask: WalkMask | null;
+  /** Largeur praticable à pied par arête (m). */
+  walk: Float32Array;
   tick: number;
   tMs: number;
 }
@@ -32,7 +34,7 @@ export function columnOffset(i: number, n: number, L: number): number {
 /** Demi-largeur de front disponible à l'abscisse courante du curseur (largeur de rue lissée aux jonctions). */
 function halfWidth(g: CrowdGroup, c: MotionCtx, route: Route): number {
   const edges = route.edges;
-  const W = (e: number) => c.graph.edgeWidth[edges[e] as number] as number;
+  const W = (e: number) => c.walk[edges[e] as number] as number;
   let w = W(cur.edge);
   if (cur.dStart < WIDTH_BLEND_M && cur.edge > 0) w = W(cur.edge - 1) + (w - W(cur.edge - 1)) * (0.5 + (0.5 * cur.dStart) / WIDTH_BLEND_M);
   else if (cur.dEnd < WIDTH_BLEND_M && cur.edge < edges.length - 1) w = W(cur.edge + 1) + (w - W(cur.edge + 1)) * (0.5 + (0.5 * cur.dEnd) / WIDTH_BLEND_M);

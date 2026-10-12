@@ -12,6 +12,8 @@ export type StreetStateId = 0 | 1 | 2 | 3;
 
 export interface EdgeState {
   scenarioBlock: Uint8Array;
+  /** Largeur praticable à pied (m) : espace libre entre façades. `edgeWidth` reste la chaussée (véhicules). */
+  walkWidth: Float32Array;
   /** Longueur maximale (m) de l'arête couverte par une foule (0 = aucune information : on suppose toute la longueur). */
   presence: Float32Array;
   /** Largeur (m) de la section de rue occupée par les foules présentes (0 = aucune information). */
@@ -33,6 +35,7 @@ export function createEdgeState(g: StreetGraph): EdgeState {
   const n = g.edgeCount;
   return {
     scenarioBlock: new Uint8Array(n),
+    walkWidth: Float32Array.from(g.edgeWidth),
     presence: new Float32Array(n),
     section: new Float32Array(n),
     load: new Float32Array(n),
@@ -91,6 +94,8 @@ function polygonAreaInDiscApprox(ring: Float32Array, cx: number, cy: number, r: 
 
 /** Tampons remplis par `accumulateLoads` (un jeu par recalcul). */
 export interface LoadAccum {
+  /** Largeur praticable par arête (si absente : largeur de chaussée). */
+  walkWidth?: Float32Array;
   load: Float32Array;
   presence: Float32Array;
   section: Float32Array;
@@ -116,7 +121,7 @@ export function accumulateLoads(
   const add = (fi: number, e: number, load: number, presence: number, sectionW: number) => {
     out.load[e]! += load;
     if (presence > (out.presence[e] as number)) out.presence[e] = presence;
-    if (presence >= p.minPresenceM) out.section[e]! += Math.min(g.edgeWidth[e] as number, sectionW);
+    if (presence >= p.minPresenceM) out.section[e]! += Math.min(((out.walkWidth ?? g.edgeWidth)[e]) as number, sectionW);
     onPart?.(fi, e, load);
   };
   for (let fi = 0; fi < foot.length; fi++) {
@@ -144,7 +149,7 @@ export function accumulateLoads(
           inside += segmentLengthInCircle(g.shape[2 * (i - 1)]!, g.shape[2 * (i - 1) + 1]!, g.shape[2 * i]!, g.shape[2 * i + 1]!, f.center.x, f.center.y, f.radius);
         }
         if (inside <= 0) continue;
-        const area = inside * (g.edgeWidth[e] as number);
+        const area = inside * (((out.walkWidth ?? g.edgeWidth)[e]) as number);
         parts.push([e, area, inside]);
         total += area;
       }
@@ -173,7 +178,8 @@ export function deriveStates(g: StreetGraph, st: EdgeState, p: NavParams): boole
   let changed = false;
   for (let e = 0; e < g.edgeCount; e++) {
     const len = g.edgeLen[e] as number;
-    const W = g.edgeWidth[e] as number;
+    const W = st.walkWidth[e] as number; // largeur praticable (piétons)
+    const Wveh = g.edgeWidth[e] as number; // chaussée (véhicules)
     const n = st.load[e] as number;
     const informed = (st.presence[e] as number) > 0;
     const pres = informed ? Math.max(1, st.presence[e] as number) : len;
@@ -188,8 +194,10 @@ export function deriveStates(g: StreetGraph, st: EdgeState, p: NavParams): boole
     else if (occ / W >= p.partialObstruction) foot = 2;
     else if (rho >= p.slowedDensity) foot = 1;
 
+    // la foule occupe `occ` mètres de la largeur praticable : elle couvre d'abord la chaussée
+    const freeVeh = Math.max(0, Wveh - occ);
     let veh: StreetStateId = 0;
-    if (occ > 0.05 && free < Math.min(p.vehicleMinFreeWidthM, W)) veh = 3;
+    if (occ > 0.05 && freeVeh < Math.min(p.vehicleMinFreeWidthM, Wveh)) veh = 3;
     else if (occ / W >= p.partialObstruction) veh = 2;
     else if (rho >= p.slowedDensity) veh = 1;
 

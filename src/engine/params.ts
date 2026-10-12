@@ -26,6 +26,18 @@ export interface SimParams {
   marchFrontWidthMinM: number;
   /** Rayon (m) autour de la destination dans lequel un groupe peut traverser une foule dense pour la rejoindre. */
   arrivalZoneM: number;
+  /** Facteur de vitesse d'un cortège selon la classe de la voie (indice = EdgeClass) : boulevard > rue > ruelle > escaliers. */
+  speedFactorByClass: Record<number, number>;
+  /** Accélération/décélération maximale d'un cortège (m/s²) : les changements de type de rue sont lissés. */
+  crowdAccelMps2: number;
+  /** Densité (personnes/m²) d'un cortège à l'arrêt bloqué : il se tasse en bloc contre l'obstacle, sur toute la largeur praticable. */
+  waitDensity: number;
+  /** Largeur praticable maximale retenue pour une rue (m) ; mesurée façade à façade avec les bâtiments. */
+  walkWidthMaxM: number;
+  /** Intervalle entre points de mesure de la largeur praticable le long d'une rue (m). */
+  walkWidthSampleEveryM: number;
+  /** Trottoir supposé de chaque côté (m) d'une rue ouverte aux véhicules quand aucun bâtiment ne permet de mesurer. */
+  sidewalkAllowanceM: number;
   /** Marge entre le cortège et le bord de la rue (m). */
   streetMarginM: number;
   /** Variation maximale de la longueur de colonne (m/s) : évite les sauts de position. */
@@ -112,6 +124,12 @@ export const DEFAULT_SIM_PARAMS: SimParams = {
   marchFrontWidthMaxM: 14,
   marchFrontWidthMinM: 2,
   arrivalZoneM: 40,
+  speedFactorByClass: { 0: 1.1, 1: 1.05, 2: 1, 3: 0.95, 4: 0.95, 5: 0.9, 6: 0.8, 7: 1, 8: 0.85, 9: 0.75, 10: 0.5, 11: 0.7 },
+  crowdAccelMps2: 0.35,
+  waitDensity: 3,
+  walkWidthMaxM: 24,
+  walkWidthSampleEveryM: 10,
+  sidewalkAllowanceM: 2.5,
   streetMarginM: 0.8,
   columnLengthRateMps: 4,
   staticMaxRadiusM: 2500,

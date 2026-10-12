@@ -8,6 +8,10 @@ export interface NavParams {
   speedVehicleByClass: Record<number, number>;
   /** Multiplicateurs de coût pour les cortèges (préfèrent rues et places). */
   crowdPenaltyFootway: number;
+  /** Largeur praticable (m) en dessous de laquelle une rue est pénalisée pour un cortège (surcoût proportionnel au manque). */
+  crowdPreferredWidthM: number;
+  /** Surcoût maximal (multiple) pour une rue très étroite. */
+  crowdNarrowPenalty: number;
   crowdPenaltySteps: number;
   /** Largeur libre minimale (m) pour qu'un véhicule franchisse une section de rue partiellement occupée (véhicule + marge de manœuvre). */
   vehicleMinFreeWidthM: number;
@@ -45,6 +49,8 @@ export const DEFAULT_NAV_PARAMS: NavParams = {
     [EdgeClass.Service]: 3,
   },
   crowdPenaltyFootway: 0.5,
+  crowdPreferredWidthM: 8,
+  crowdNarrowPenalty: 1.2,
   crowdPenaltySteps: 2,
   vehicleMinFreeWidthM: 3.5,
   footMinWidthM: 0.6,
