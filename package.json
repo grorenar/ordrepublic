@@ -1,0 +1,28 @@
+{
+  "name": "ordre-public",
+  "private": true,
+  "version": "0.2.0",
+  "description": "Ordre Public \u2014 jeu de simulation de commandement du maintien de l'ordre (fictif)",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --port 4173",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "bench:engine": "rolldown scripts/bench-engine.ts --file dist-bench/bench.mjs --platform node --format esm && node --expose-gc dist-bench/bench.mjs"
+  },
+  "dependencies": {
+    "maplibre-gl": "^6.13.0",
+    "preact": "^11.0.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.0",
+    "@preact/preset-vite": "^2.10.6",
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.3"
+  }
+}

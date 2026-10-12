@@ -1,0 +1,468 @@
+{
+ "version": 0.6,
+ "generator": "fixture simulée",
+ "elements": [
+  {
+   "type": "node",
+   "id": 1,
+   "lat": 49.1193,
+   "lon": 6.1757
+  },
+  {
+   "type": "node",
+   "id": 2,
+   "lat": 49.1200187,
+   "lon": 6.1757
+  },
+  {
+   "type": "node",
+   "id": 3,
+   "lat": 49.1207373,
+   "lon": 6.1757
+  },
+  {
+   "type": "node",
+   "id": 4,
+   "lat": 49.1193,
+   "lon": 6.1770726
+  },
+  {
+   "type": "node",
+   "id": 5,
+   "lat": 49.1200187,
+   "lon": 6.1770726
+  },
+  {
+   "type": "node",
+   "id": 6,
+   "lat": 49.1207373,
+   "lon": 6.1770726
+  },
+  {
+   "type": "node",
+   "id": 7,
+   "lat": 49.1193,
+   "lon": 6.1784451
+  },
+  {
+   "type": "node",
+   "id": 8,
+   "lat": 49.1200187,
+   "lon": 6.1784451
+  },
+  {
+   "type": "node",
+   "id": 9,
+   "lat": 49.1207373,
+   "lon": 6.1784451
+  },
+  {
+   "type": "node",
+   "id": 10,
+   "lat": 49.1193,
+   "lon": 6.1798177
+  },
+  {
+   "type": "node",
+   "id": 11,
+   "lat": 49.1200187,
+   "lon": 6.1798177
+  },
+  {
+   "type": "node",
+   "id": 12,
+   "lat": 49.1207373,
+   "lon": 6.1798177
+  },
+  {
+   "type": "node",
+   "id": 13,
+   "lat": 49.1193539,
+   "lon": 6.1763863
+  },
+  {
+   "type": "node",
+   "id": 14,
+   "lat": 49.1213661,
+   "lon": 6.1798177
+  },
+  {
+   "type": "way",
+   "id": 100,
+   "nodes": [
+    1,
+    13,
+    4,
+    7,
+    10
+   ],
+   "tags": {
+    "highway": "residential",
+    "name": "Rue Horizontale 0 (fictive)"
+   }
+  },
+  {
+   "type": "way",
+   "id": 101,
+   "nodes": [
+    2,
+    5,
+    8,
+    11
+   ],
+   "tags": {
+    "highway": "primary",
+    "name": "Avenue Principale (fictive)",
+    "width": "14"
+   }
+  },
+  {
+   "type": "way",
+   "id": 102,
+   "nodes": [
+    3,
+    6,
+    9,
+    12
+   ],
+   "tags": {
+    "highway": "residential",
+    "name": "Rue Horizontale 2 (fictive)"
+   }
+  },
+  {
+   "type": "way",
+   "id": 200,
+   "nodes": [
+    1,
+    2,
+    3
+   ],
+   "tags": {
+    "highway": "residential",
+    "name": "Rue Verticale 0 (fictive)"
+   }
+  },
+  {
+   "type": "way",
+   "id": 201,
+   "nodes": [
+    4,
+    5,
+    6
+   ],
+   "tags": {
+    "highway": "residential",
+    "name": "Rue Verticale 1 (fictive)"
+   }
+  },
+  {
+   "type": "way",
+   "id": 202,
+   "nodes": [
+    7,
+    8,
+    9
+   ],
+   "tags": {
+    "highway": "residential",
+    "name": "Sens Unique (fictif)",
+    "oneway": "yes"
+   }
+  },
+  {
+   "type": "way",
+   "id": 203,
+   "nodes": [
+    10,
+    11,
+    12
+   ],
+   "tags": {
+    "highway": "pedestrian",
+    "name": "Rue Piétonne (fictive)"
+   }
+  },
+  {
+   "type": "way",
+   "id": 204,
+   "nodes": [
+    12,
+    14
+   ],
+   "tags": {
+    "highway": "steps"
+   }
+  },
+  {
+   "type": "node",
+   "id": 15,
+   "lat": 49.1237916,
+   "lon": 6.1688372
+  },
+  {
+   "type": "node",
+   "id": 16,
+   "lat": 49.1237916,
+   "lon": 6.1825628
+  },
+  {
+   "type": "way",
+   "id": 300,
+   "nodes": [
+    15,
+    16
+   ],
+   "tags": {
+    "highway": "motorway"
+   }
+  },
+  {
+   "type": "node",
+   "id": 17,
+   "lat": 49.1193269,
+   "lon": 6.1757
+  },
+  {
+   "type": "node",
+   "id": 18,
+   "lat": 49.1193269,
+   "lon": 6.1770726
+  },
+  {
+   "type": "way",
+   "id": 301,
+   "nodes": [
+    17,
+    18
+   ],
+   "tags": {
+    "highway": "footway",
+    "footway": "sidewalk"
+   }
+  },
+  {
+   "type": "node",
+   "id": 19,
+   "lat": 49.1228933,
+   "lon": 6.1757
+  },
+  {
+   "type": "node",
+   "id": 20,
+   "lat": 49.1228933,
+   "lon": 6.1770726
+  },
+  {
+   "type": "way",
+   "id": 302,
+   "nodes": [
+    19,
+    20
+   ],
+   "tags": {
+    "highway": "service",
+    "access": "private"
+   }
+  },
+  {
+   "type": "way",
+   "id": 303,
+   "nodes": [
+    19,
+    20
+   ],
+   "tags": {
+    "highway": "construction"
+   }
+  },
+  {
+   "type": "node",
+   "id": 21,
+   "lat": 49.1372663,
+   "lon": 6.203151
+  },
+  {
+   "type": "node",
+   "id": 22,
+   "lat": 49.1372663,
+   "lon": 6.2045236
+  },
+  {
+   "type": "way",
+   "id": 304,
+   "nodes": [
+    21,
+    22
+   ],
+   "tags": {
+    "highway": "residential",
+    "name": "Rue Isolée (fictive)"
+   }
+  },
+  {
+   "type": "node",
+   "id": 23,
+   "lat": 49.1193898,
+   "lon": 6.1772098
+  },
+  {
+   "type": "node",
+   "id": 24,
+   "lat": 49.1193898,
+   "lon": 6.1783078
+  },
+  {
+   "type": "node",
+   "id": 25,
+   "lat": 49.1199288,
+   "lon": 6.1783078
+  },
+  {
+   "type": "node",
+   "id": 26,
+   "lat": 49.1199288,
+   "lon": 6.1772098
+  },
+  {
+   "type": "way",
+   "id": 400,
+   "nodes": [
+    23,
+    24,
+    25,
+    26,
+    23
+   ],
+   "tags": {
+    "place": "square",
+    "name": "Place du Test (fictive)"
+   }
+  },
+  {
+   "type": "node",
+   "id": 27,
+   "lat": 49.1193898,
+   "lon": 6.1785824
+  },
+  {
+   "type": "node",
+   "id": 28,
+   "lat": 49.1193898,
+   "lon": 6.1796804
+  },
+  {
+   "type": "node",
+   "id": 29,
+   "lat": 49.1199288,
+   "lon": 6.1796804
+  },
+  {
+   "type": "node",
+   "id": 30,
+   "lat": 49.1199288,
+   "lon": 6.1785824
+  },
+  {
+   "type": "way",
+   "id": 401,
+   "nodes": [
+    27,
+    28,
+    29,
+    30,
+    27
+   ],
+   "tags": {
+    "leisure": "park",
+    "name": "Parc du Test (fictif)"
+   }
+  },
+  {
+   "type": "node",
+   "id": 31,
+   "lat": 49.1201085,
+   "lon": 6.1758373
+  },
+  {
+   "type": "node",
+   "id": 32,
+   "lat": 49.1201085,
+   "lon": 6.1769353
+  },
+  {
+   "type": "node",
+   "id": 33,
+   "lat": 49.1206475,
+   "lon": 6.1769353
+  },
+  {
+   "type": "node",
+   "id": 34,
+   "lat": 49.1206475,
+   "lon": 6.1758373
+  },
+  {
+   "type": "way",
+   "id": 402,
+   "nodes": [
+    31,
+    32,
+    33,
+    34,
+    31
+   ],
+   "tags": {
+    "building": "retail",
+    "name": "Commerce Test (fictif)"
+   }
+  },
+  {
+   "type": "node",
+   "id": 35,
+   "lat": 49.1201085,
+   "lon": 6.1772098
+  },
+  {
+   "type": "node",
+   "id": 36,
+   "lat": 49.1201085,
+   "lon": 6.1783078
+  },
+  {
+   "type": "node",
+   "id": 37,
+   "lat": 49.1206475,
+   "lon": 6.1783078
+  },
+  {
+   "type": "node",
+   "id": 38,
+   "lat": 49.1206475,
+   "lon": 6.1772098
+  },
+  {
+   "type": "way",
+   "id": 403,
+   "nodes": [
+    35,
+    36,
+    37,
+    38,
+    35
+   ],
+   "tags": {
+    "building": "yes"
+   }
+  },
+  {
+   "type": "relation",
+   "id": 9,
+   "members": [],
+   "tags": {
+    "type": "multipolygon",
+    "building": "yes"
+   }
+  }
+ ]
+}

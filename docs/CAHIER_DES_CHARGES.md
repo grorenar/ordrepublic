@@ -1,7 +1,16 @@
 # ORDRE PUBLIC — Cahier des charges technique et fonctionnel (Phase 1)
 
-Version : 0.1 (brouillon soumis à validation) — 2026-10-11
-Statut : **aucun code n'a été écrit.** Ce document attend la validation explicite du commanditaire.
+Version : **0.4** — 2026-10-11
+Statut : phases 1 et 2 livrées ; **phase 3 en cours** (plan validé avec les décisions v0.4 : [`PHASE3_PLAN.md`](PHASE3_PLAN.md)) ; **validation intermédiaire à mi-phase** prévue avant la seconde moitié.
+
+### Journal des révisions
+
+| Version | Changement |
+|---|---|
+| 0.1 | Cahier des charges initial (phase 1). |
+| 0.2 | **Google Maps abandonné au profit d'OpenStreetMap + MapLibre GL JS** (décision du commanditaire, phase 2). Les §3 (tableau Google), §4 et les mentions Google des §2.5/§11/§12 sont **supersédés** : voir README et §14 ci-dessous. |
+| 0.4 | **Décisions du commanditaire** : planche graphique de référence reçue (§18bis, §22–§27) ; capacité cible 50 000 personnes sans plafond structurel (§23) ; paramètres de mouvement/densité configurables, blocage géométrique à états intermédiaires, plus de facteur de détour maximal (§24) ; **noms OSM affichés, plus d'anonymisation par défaut** (§16.4 révisé, §25) ; fond schématique si pas de graphe cohérent ; validation à mi-phase (§27). Voir §22 à §27. |
+| 0.3 | Ajout des **exigences v0.3** : logique comportementale causale des foules, utilisation des données OSM (POI, graphe de navigation indépendant), style visuel des pions, conséquences sur le moteur, nouveau découpage des phases 3 à 7. Voir §14 à §21. |
 
 > Légende de fiabilité utilisée dans tout le document
 > - ✅ **Vérifié** : confirmé par une source consultée pendant la rédaction.
@@ -96,13 +105,11 @@ tests/           unitaires + intégration + « replays » déterministes
 - **Niveau visuel** : le reste de la foule est un **nuage de marqueurs cosmétiques** (boids légers : cohésion/séparation/bruit) autour du centre du groupe, rendus en batch. 3 000 à 8 000 points animés sont réalistes à 60 FPS en Canvas/WebGL ; ils n'ont pas d'état de simulation individuel.
 - **LOD au zoom** : zoom faible → symboles de groupe agrégés avec effectif ; zoom moyen → nuage de points ; zoom fort → silhouettes, boucliers, animations plus détaillées.
 
-### 2.5 Navigation simplifiée
+### 2.5 Navigation *(révisé v0.3 — voir §17 et `PHASE3_PLAN.md` §3)*
 
-- Google Maps **ne fournit pas** de moteur de déplacement de foules. Le jeu embarque son propre graphe de navigation :
-  - Pour les villes pré-packagées : un **graphe de rues** (segments + nœuds + îlots) pré-calculé à partir d'OpenStreetMap (licence ODbL, attribution « © contributeurs OpenStreetMap » requise ⚠️).
-  - Pour une ville libre : récupération à la demande (API Overpass publique, avec cache local) ; en cas d'échec, **navigation en espace libre** avec obstacles abstraits (îlots de bâtiments approximés par une grille).
-- Déplacement : A* sur le graphe (ou flowfield sur grille 8 m) ; vitesse selon type d'unité, fatigue, encombrement, blocages.
-- **Rues bloquées** = segments du graphe marqués `blocked` (par foule dense, véhicule, feu, barrage). Le compteur « N / M » = segments bloqués / segments de la zone de jeu active. Il reflète uniquement l'état simulé.
+- Le moteur embarque son **propre graphe de navigation**, indépendant de la carte : construit à partir des voies OSM (paquets de ville pré-calculés ou requête bornée) ou de la ville schématique ; il n'est jamais extrait des tuiles affichées.
+- L'ancienne « navigation en espace libre » est **supprimée** : sans graphe réel, le jeu bascule sur le fond schématique.
+- **Rues bloquées** = état dynamique des arêtes du graphe ; le compteur « N/M » en est dérivé.
 
 ---
 
@@ -114,8 +121,8 @@ tests/           unitaires + intégration + « replays » déterministes
 | Build | **Vite** | Démarrage instantané, bundle statique, aucune infra serveur. |
 | UI | **DOM + Preact (≈3 Ko) ou Web Components légers** | HUD riche (listes, panneaux, formulaires) plus simple en DOM qu'en canvas ; accessibilité et CSS gratuits. Pas de framework lourd. |
 | Rendu des pions | **Canvas 2D en couche superposée** (v1), **abstraction permettant PixiJS/WebGL** si nécessaire | Canvas 2D suffit pour quelques milliers de points avec LOD ; évite la complexité WebGL au départ. Plan B documenté : PixiJS ou WebGL Overlay View / deck.gl. |
-| Carte | **Google Maps JavaScript API** (carte vectorielle, type `satellite`/`hybrid`) via interface `MapProvider` | Respect de l'apparence demandée, sans scraping ni tuiles brutes. |
-| Carte de repli | **SchematicProvider** : rendu canvas du graphe de rues + îlots + hydro/espaces verts (pas de satellite) | Mode démo sans clé / hors ligne, 100 % autonome. |
+| Carte | ~~Google Maps~~ → **MapLibre GL JS + OpenStreetMap** (v0.2) via l'interface `MapAdapter` | Choix du commanditaire (coût, intégration) ; sans clé ; fournisseur de tuiles et géocodeur configurables. |
+| Carte de repli | **SchematicAdapter** : rendu canvas du graphe de rues + îlots + hydro/espaces verts (pas de satellite) | Mode démo sans clé / hors ligne, 100 % autonome. |
 | Tests | **Vitest** (moteur sous Node) + **Playwright** (parcours UI, Chromium déjà présent dans l'environnement) | Moteur déterministe → tests de replay ; E2E pour sauvegarde et flux principaux. |
 | Persistance | **IndexedDB** (sauvegardes, historique) + **localStorage** (préférences) + export/import JSON | Sauvegardes volumineuses → IndexedDB ; JSON versionné avec migrations. |
 | Données de villes | Packs JSON compressés générés par script (Overpass → graphe/commerces) | Chargement instantané, pas de dépendance réseau pendant la partie. |
@@ -126,7 +133,7 @@ tests/           unitaires + intégration + « replays » déterministes
 
 ---
 
-## 4. Contraintes Google Maps Platform
+## 4. Contraintes Google Maps Platform — *SUPERSÉDÉ (v0.2) : Google Maps n'est plus utilisé ; section conservée pour mémoire*
 
 ### 4.1 Ce que j'ai pu établir
 
@@ -328,19 +335,21 @@ Mode carrière, météo/jour-nuit dynamiques, multi-villes simultanées, bruit/a
 
 ---
 
-## 10. Plan par phases (rappel et livrables)
+## 10. Plan par phases *(révisé en v0.3 — remplace le tableau initial)*
 
-| Phase | Livrables | Critère de sortie |
+| Phase | Contenu | État |
 |---|---|---|
-| 2 | Accueil, carte, recherche, repli schématique, HUD statique, premiers marqueurs, gestion d'erreurs | Carte OK avec clé ; repli OK sans clé/erreur ; zoom/pan fluide |
-| 3 | Moteur, unités, déplacements, groupes, animation, pause, vitesses | Déterminisme testé ; 3 000+ points à 60 FPS ; pause/reprise sans saut d'état |
-| 4 | Incidents, dégradations, incendies, tension, journal | Chaînes causales testées ; état persistant |
-| 5 | Moyens, blessures, secours, pompiers, conséquences | Chaque victime suivie jusqu'à résolution ; secouristes protégeables |
-| 6 | Scénarios, objectifs, difficulté, bac à sable | 3 missions jouables ; paramètres bac à sable effectifs |
-| 7 | Bilan, score, conséquences, sauvegardes, historique | Save→load rejoue identique ; rapport explicatif |
-| 8 | Finition, performance, docs | Revue complète des critères §24 |
+| 1 | Analyse et cahier des charges | ✅ validée |
+| 2 | Prototype cartographique et interface (OSM/MapLibre, fond schématique, rendu Canvas 2D, pions de démonstration) | ✅ livrée, en attente d'un test sur services réels |
+| 3 | **Moteur de simulation et navigation** : graphe indépendant, groupes logiques et individus simulés à grande échelle (objectif de test 50 000), cortèges / rassemblements statiques / groupes secondaires, transitions causales, déplacements d'unités et de véhicules, temps/pause, **interfaces pour le futur système de sprites** — découpée en **3a/3b (jusqu'à la validation intermédiaire)** puis **3c/3d** | **en cours** |
+| 4 | **Incidents et lieux d'intérêt (POI)** : POI issus d'OSM + objets de scénario synthétiques, dégradations, incendies, interactions avec le décor | à venir |
+| 5 | **Rendu avancé et comportements** : silhouettes de personnes, densité de foule, comportements individuels, représentation des unités | à venir |
+| 6 | **Interventions et secours** : moyens, blessures, secours, pompiers, conséquences humaines | à venir |
+| 7 | **Missions et évaluation** : scénarios, bac à sable, objectifs, bilans, sauvegardes | à venir |
+| 8 | Finition, performance, documentation | à venir |
 
----
+Règle de gouvernance : pour chaque phase, **plan → structures/mécaniques → tests → validation → code → résultat testable documenté**,
+en distinguant les tests simulés des vérifications sur services réels. Aucun commit ni pull request sans autorisation.
 
 ## 11. Coûts et dépendances
 
@@ -365,3 +374,194 @@ Mode carrière, météo/jour-nuit dynamiques, multi-villes simultanées, bruit/a
 ## 13. Critères de validation (Phase 1)
 
 La Phase 1 est validée si vous approuvez : (a) l'architecture en trois couches et la pile TypeScript/Vite/Canvas, (b) l'approche foule hybride, (c) le traitement des contraintes Google (§4) et le plan B, (d) le principe de traçabilité des sources (§5), (e) le périmètre V1 (§9), (f) les réponses aux questions ci-dessous.
+
+---
+
+# ADDENDUM v0.3 — Exigences complémentaires
+
+## 14. Principe directeur : causalité de toute entité
+
+> **Aucune foule n'apparaît ni ne se déplace sans raison.** Toute entité de jeu (groupe, unité, véhicule, incident) a une
+> *origine* (`cause`) identifiable dans le scénario, un événement ou une transition d'état explicite.
+
+- Chaque création passe par `createGroup(spec, cause)` ; **un invariant du moteur refuse** (et un test vérifie) toute création sans cause.
+- `Cause = { kind: 'scenario_plan' | 'scenario_event' | 'transition' | 'player_order' | 'rule', refId, note }`.
+- Toute transition importante écrit une entrée de journal **explicative** (« pourquoi ») et une entrée dans l'historique du groupe.
+- Les apparitions autorisées sont : (a) mise en place initiale décrite par le scénario ; (b) arrivée programmée par le scénario à une
+  *porte d'entrée* de la zone (le groupe est alors créé à l'extérieur/au bord et rejoint son objectif par le graphe) ; (c) scission, jonction ou
+  départ issus d'une transition d'un groupe existant.
+- Les déplacements suivent des routes du graphe ; une destination ne change **que** par une cause journalisée (événement, blocage prolongé, ordre du scénario).
+
+## 15. Types de rassemblements
+
+| Type | Rattachement | Mouvement | Évolution locale |
+|---|---|---|---|
+| **A. Cortège mobile** | point de départ + destination (+ points de passage éventuels) | suit un **itinéraire calculé sur le graphe** à vitesse de marche de jeu ; progression visible | cohésion, ralentissement, arrêt, fragmentation selon règles explicables |
+| **B. Rassemblement statique** | un **lieu précis ou une zone** (ancre : place, devant un établissement, piquet…) | aucun déplacement d'ensemble ; le *centre* est fixe | densification, légère extension, arrivées/départs d'individus, baisse d'effectif |
+| **C. Groupe mobile secondaire** | origine (groupe parent ou porte d'entrée) + destination prévue | itinéraire graphe, indépendant du cortège | idem A ; apparition **toujours expliquée** |
+
+Distinction fondamentale : **position centrale du rassemblement** (logique collective) ≠ **position individuelle** de chaque personne
+(membres simulés, contraints par le groupe).
+
+**Transitions** (chacune avec cause + journal) : cortège → statique à l'arrivée ; statique → dispersion progressive ; division en groupes plus petits ;
+départs individuels ; déplacement vers une destination prévue ; changement de tension après incident (Phase 4+). Détail et table de gardes : `PHASE3_PLAN.md` §5.
+
+## 16. Données OpenStreetMap, lieux d'intérêt (POI) et provenance
+
+### 16.1 Principes
+- OSM = **information géographique incomplète et variable**, jamais une connaissance exhaustive. Aucune hypothèse de complétude par bâtiment.
+- Chaque objet porte une **provenance** : `source: 'osm' | 'synthetic'` (+ `osmId` si applicable) et un **niveau de confiance** par attribut.
+- **Ce qui vient d'OSM** : géométrie des voies, intersections, sens uniques, places, bâtiments (emprises), catégories de lieux, noms quand ils existent.
+  **Ce que génère le jeu** : tout objet de scénario (vitrines/commerces fictifs d'incident, poubelles, abribus fictifs, véhicules), effectifs, états de simulation, incidents.
+
+### 16.2 Catégories et attributs OSM pertinents *(à valider sur la documentation OSM avant implémentation ⚠️)*
+
+| Domaine de jeu | Étiquettes OSM usuelles | Fiabilité attendue | Usage |
+|---|---|---|---|
+| Voirie | `highway=*` (primary…residential, living_street, pedestrian, footway, steps, service), `oneway`, `access`, `foot`, `motor_vehicle`, `bridge`, `tunnel`, `name`, `width`/`lanes` | géométrie : bonne ; `width`/`lanes` : rare → valeurs par défaut par classe | graphe de navigation |
+| Places / espaces publics | `place=square`, `highway=pedestrian`+`area=yes`, `leisure=park\|garden` | variable | zones de rassemblement, positions de membres |
+| Bâtiments | `building=*` (emprises) | bonne (géométrie), attributs rares | obstacles, exclusion des positions, décor |
+| Commerces | `shop=*`, `amenity=restaurant\|cafe\|bank\|pharmacy…` | incomplète | **catégorie de rue** (« rue commerçante ») uniquement |
+| Écoles | `amenity=school\|kindergarten\|college\|university` | bonne en ville | ancres de rassemblement (choisies par le scénario) |
+| Administrations | `amenity=townhall\|courthouse`, `office=government`, `government=*` | moyenne | ancres de rassemblement (choisies par le scénario) |
+| Entreprises | `office=*`, `craft=*`, `landuse=commercial\|industrial` | moyenne | ancres (blocus/piquet fictifs) |
+| Équipements | `amenity=hospital`, `amenity=fire_station`, `amenity=parking`, `public_transport=platform`, `amenity=shelter` | bonne/moyenne | bases de secours, accès, décor |
+| Mobilier | `amenity=waste_basket`, `highway=street_lamp`, `emergency=fire_hydrant`… | **très incomplète** | si absent → objets **synthétiques** |
+
+Les installations de police/gendarmerie **ne sont pas** utilisées comme cibles ni catégorisées par vulnérabilité.
+
+### 16.3 Structure POI minimale
+`Poi { id, kind, category, geometry|pos, name?, osm?: { id, tags(utiles) }, source: 'osm'|'synthetic', sim: { state, … }, incidentIds[] }`.
+Le moteur distingue : commerce, établissement public, école, entreprise, espace de rassemblement, mobilier. Les POI sont affichables et sélectionnables (Phase 4 ; la Phase 3 n'introduit que l'*ancre* minimale).
+
+### 16.4 Règle de choix des cibles d'incident (non négociable)
+- Les incidents sont générés par **scénarios synthétiques et règles de jeu** ; **aucune** donnée OSM n'est utilisée pour classer des établissements réels selon leur vulnérabilité (aucun champ « vulnérabilité » n'existe dans le modèle).
+- Les cibles sont des **objets de scénario synthétiques** (vitrine fictive, commerce fictif, poubelle, abribus…) posés sur des **emplacements de décor** générés de façon déterministe le long des rues (pas sur les établissements réels). OSM ne fournit au plus qu'une *catégorie générale de rue* (ex. « rue commerçante »).
+- **Noms OSM affichés** *(révisé v0.4, remplace l'anonymisation par défaut)* : les noms disponibles dans OSM (rues, places, commerces, établissements) sont affichés lorsque pertinent. En contrepartie, **tout incident, dommage, incendie ou pillage reste explicitement fictif** (étiquette « scénario fictif » / objet synthétique) et n'est **jamais présenté comme un fait réel concernant un établissement réel** ; aucun classement de vulnérabilité n'existe.
+- Un incident a **une durée, un état et des conséquences mesurables** (Phase 4).
+
+### 16.5 Données manquantes
+Le jeu ne doit jamais dépendre de la richesse d'OSM : (1) objets synthétiques, (2) catégories génériques, (3) mode démonstration (ville schématique avec son graphe), (4) repli du graphe : paquet pré-calculé → récupération ciblée → graphe synthétique. Une ville pauvre en données reste jouable ; l'interface indique la part de données OSM vs synthétiques.
+
+### 16.6 Obtention des données et licence
+- **Pas de téléchargement massif via des services publics non prévus pour cela.** Le serveur public Overpass indique ≈ moins de 10 000 requêtes et 1 Go par jour comme repère de non-nuisance, **à diviser par 100 pour un usage régulier**, avec `User-Agent`/`Referer` identifiant l'application (source wiki OSM ✅ recherche web, à re-vérifier).
+- Voie principale : **paquets de ville pré-calculés** (graphe + POI utiles, emprise limitée autour de la zone de jeu) produits **une fois, hors ligne**, par un script du dépôt à partir d'un extrait régional ou d'une requête unique et bornée ; paquets conservés dans `data/` avec mention de licence.
+- Voie secondaire (villes libres) : **une** requête bornée à la zone de jeu, déclenchée explicitement par le joueur, mise en cache locale (IndexedDB), sinon repli synthétique.
+- **ODbL** (⚠️ à confirmer, pas un avis juridique) : les paquets extraits d'OSM sont une *base de données dérivée* ; s'ils sont **redistribués publiquement**, ils doivent rester sous ODbL avec attribution « © contributeurs OpenStreetMap ». Ils seront donc isolés dans `data/osm/` avec leur licence, séparés du code. Un usage purement personnel ne déclenche pas d'obligation de redistribution.
+
+## 17. Navigation indépendante
+
+- Le **graphe de navigation** est construit à partir de **données géographiques** (voies OSM, ou ville schématique), **jamais** à partir des tuiles visuelles ni de `queryRenderedFeatures` (mécanisme de la Phase 2 : **abandonné** pour le moteur).
+- Le graphe est **indépendant de MapLibre** ; le moteur fonctionne identiquement sur le fond schématique.
+- Format : nœuds + arêtes (longueur, classe, largeur estimée, sens unique, accès piéton/véhicule, nom) en structure statique **immuable**, plus un **état dynamique** par arête (blocages, coûts) modifiable par la simulation.
+- Les **rues bloquées** de la simulation modifient l'état dynamique (coût/interdiction) ; les itinéraires sont recalculés selon des règles explicables ; le compteur « rues bloquées N/M » est dérivé de ce même état (M = arêtes de la zone de jeu).
+- Un trajet est calculé entre deux points de jeu (nœuds ou points projetés sur le graphe) avec A*. Spécification détaillée : `PHASE3_PLAN.md` §3.
+- Si aucun graphe réel n'est disponible pour une ville, la partie ne peut pas se jouer **sur le fond OSM** (les rues du jeu ne correspondraient pas à la carte affichée) : le jeu propose alors le fond schématique (voir décision D5).
+
+## 18. Style visuel des pions (référence : planche graphique reçue en v0.4 — voir §18bis)
+
+Rendu de type **simulation tactique aérienne** en **Canvas 2D** (conservé), couche distincte de la carte.
+
+**A. Manifestants** : silhouettes humaines très simplifiées vues du dessus (tête + épaules/corps), couleur de vêtement variable, orientation, contour/ombre léger, animation discrète (marche ou mouvement sur place), variations d'apparence et de position sans répétition mécanique ; densité suffisante pour une vraie foule, lisibilité préservée ; mouvements individuels contraints par le groupe.
+
+**B. CRS/police** : silhouette compacte, équipement de protection identifiable, **bouclier visible**, orientation = déplacement/état, **identifiant numérique fictif stable** (jamais modifié par un déplacement ou un zoom, taille adaptée au zoom), contour de sélection, états visuels : au repos / en déplacement / sélectionnée / occupée / en difficulté / indisponible. CRS distincts des policiers, manifestants, ambulances, pompiers.
+
+**C. Véhicules** : symboles vus du dessus, orientés selon le déplacement, catégories distinctes : police, CRS, ambulance, pompiers, soutien ; **ils suivent le système de déplacement** (jamais figés quand l'unité reçoit un ordre).
+
+**D. États visuels** — groupes : rassemblement statique / cortège en mouvement / dispersé / affecté par un incident / en cours de départ ; incidents : actif / en traitement / résolu. Couleurs et animations parcimonieuses.
+
+**E. Niveaux de détail** : faible zoom → symboles de groupe agrégés et unités simplifiées ; zoom moyen → pions individuels, identifiants conservés, véhicules et incidents plus visibles ; fort zoom → détails des personnages et équipements, sélection précise, animation fluide. **Nombre d'entités simulées ≠ nombre de pions dessinés** (échantillon représentatif selon le zoom, sélection stable par permutation fixe pour éviter le scintillement).
+
+**F. Intégration technique** : le moteur stocke **positions et états en mètres locaux** (jamais en pixels) ; le rendu convertit via la caméra de la carte (alignement conservé en zoom/déplacement — déjà vérifié en Phase 2) ; animations indépendantes de la simulation ; redessin limité (dirty flags) ; optimisation foule dense (atlas de sprites pré-rendus + `drawImage`, voir `PHASE3_PLAN.md` §9) ; **détection de clic sub-linéaire** (index spatial : groupes d'abord, puis grille des membres du seul groupe touché).
+
+## 19. Conséquences sur le moteur
+
+Un **groupe logique** possède : type de rassemblement, effectif, état comportemental, position/zone de référence, destination éventuelle, progression, ensemble de **membres simulés**, **historique** des événements importants. Le moteur distingue quatre niveaux :
+
+1. **logique collective** du groupe (FSM, route, effectif, tension) ;
+2. **comportements individuels** (suivi de créneau, hésitation, départ) ;
+3. **positions de simulation** (mètres locaux, tableaux typés) ;
+4. **marqueurs dessinés** (échantillon, décidé par le rendu).
+
+Les événements modifient l'état de façon **déterministe/reproductible** (graine, flux aléatoires séparés, bruit stateless par (membre, tick)). Le journal peut expliquer pourquoi un groupe s'est déplacé, arrêté, fragmenté ou associé à un incident.
+
+## 20. Tests exigés (extension)
+Causalité (aucune création sans cause), optimalité/déterminisme de la navigation, replanification sur blocage, contrainte des membres au corridor de rue, transitions d'état et journal explicatif, reproductibilité (même graine → même hash d'état ; sauvegarde/chargement à mi-parcours identique), pause/reprise sans saut, alignement carte/rendu, sélection sub-linéaire, repli sur données manquantes, séparation des tests **simulés** et des vérifications **sur services réels** (tableau dans `PHASE3_PLAN.md` §11).
+
+## 21. Décisions ouvertes
+Résolues en v0.4 : voir §22 à §27.
+
+---
+
+# ADDENDUM v0.4 — Décisions du commanditaire (planche graphique, capacité, paramètres, données)
+
+## 18bis. Planche graphique de référence — analyse et architecture de sprites
+
+Fichier : `docs/reference/planche-graphique-reference.png` (**référence de direction artistique, pas un fond d'écran ni un livrable définitif**).
+
+### 18bis.1 Contenu de la planche (inventaire)
+| Famille | Éléments représentés |
+|---|---|
+| Manifestants (vue du dessus) | classique, veste jaune, casquette, capuche, sac à dos, drapeau, pancarte, groupe compact, **direction de déplacement** (flèche) |
+| « Casseurs » (rôle fictif de scénario) | classique, capuche noire, masque, sac, objet (projectile) ; poses **lanceur** et **course** |
+| Forces de l'ordre | CRS bouclier / CRS sans bouclier, police nationale bouclier / sans bouclier, gendarmerie (mobile), unité spéciale (casque) |
+| États d'unité (anneaux) | sélectionnée (cyan pointillé), en déplacement (vert pointillé + triangle), en attente (cercle blanc), en action (rouge pointillé), indisponible (gris) |
+| Secours | secouriste, sapeur-pompier, équipe médicale |
+| Véhicules | fourgon police, fourgon CRS, voiture de police, ambulance, camion de pompiers, véhicule de secours léger, véhicule de gendarmerie, voiture banalisée, moto de police, camion à eau |
+| Objets et décors | poubelle, poubelle en feu, conteneur, conteneur en feu, banc, barrière, cône, palette/débris, gravats |
+| Signalisation / marqueurs UI | sélection, destination, point d'intérêt, incident, zone d'influence, zone de jeu, rue bloquée (✕—✕ rouge), itinéraire (pointillé bleu fléché) |
+| Effets visuels | fumée légère, fumée dense, feu, explosion, gaz lacrymogène |
+| Groupe simplifié (zoom éloigné) | petit groupe, groupe moyen, grand cortège (nuées de points colorés) |
+| Environnement urbain | passage piéton, route, intersection, place, bâtiment, entrée (école/mairie/entreprise), espace vert |
+| Icônes d'information | information, alerte, incident, blessé, décès |
+
+Enseignements de style : vue strictement zénithale, **silhouettes lisibles** (tête + épaules, accessoire marquant), contour sombre, couleurs d'identification fortes (bleu foncé = forces, orange/rouge = secours/feu, blanc/neutre = foule), **foule en nuée de points colorés** à grande distance, anneaux d'état pointillés autour des unités.
+
+### 18bis.2 Architecture de sprites (infrastructure posée en phase 3, rendu détaillé en phase 5)
+Objectif : **remplacer progressivement** les éléments provisoires par des sprites cohérents avec la planche, **sans toucher au moteur**.
+
+1. **Le moteur ne connaît pas les sprites** : il stocke des données sémantiques (`ForceKind`, `loadout`, `VehicleKind`, `DecorKind`, composition d'une foule, graine d'apparence par individu). Le rendu traduit « donnée sémantique → sprite ».
+2. **Catalogue + manifeste** (`SpriteManifest`, JSON versionné) : pour chaque sprite `id`, `famille`, taille réelle en mètres (`wM × hM`), point d'ancrage, `orientations` (1/8/16/32), animations (`idle`, `walk`, `throw`, `run`…) avec nombre d'images, **niveaux de détail** (`T0 agrégé`, `T1 points`, `T2 silhouette simple`, `T3 détaillé`) avec plages de zoom, variantes de teinte/accessoire.
+3. **Fournisseurs interchangeables** (`SpriteProvider`) : `ProceduralSpriteProvider` (provisoire, dessiné par code dans un atlas hors écran — c'est le look actuel) et `ImageSpriteProvider` (un PNG par sprite ou feuilles par famille, chargés depuis `public/sprites/<jeu>/` selon le manifeste). Les deux exposent `get(spriteId, variant, orientation, frame, lodTier) → région d'atlas`. Un manifeste peut **mélanger** les deux (remplacement sprite par sprite).
+4. **Atlas à l'exécution** (packer sur `OffscreenCanvas`/canvas) avec plusieurs échelles par LOD ; dessin par `drawImage` en lots ; **orientation** : bacs pré-rendus pour le personnel (nombreux), rotation `ctx.rotate` pour les véhicules (peu nombreux).
+5. **Chaque élément est indépendant** : déplaçable, orientable, animable, sélectionnable, remplaçable ; **jamais une image de fond unique** issue de la planche.
+6. **Marqueurs d'interface** (sélection, destination, incident, alerte, zone d'influence, zone de jeu, rue bloquée, itinéraire, anneaux d'état) : primitives vectorielles (`MarkerStyle`) distinctes des sprites, pour une lisibilité garantie à toute échelle.
+7. **Effets** (fumée, feu, explosion, gaz) : système d'effets du rendu (`EffectSpec` : durée, évolution, mélange) — phase 5 ; la donnée moteur ne contient que l'état (« incendie actif », intensité).
+8. **Correspondance états ↔ visuels** : `UnitStatus` { idle, moving, engaged, waiting, unavailable, in_difficulty } ↔ anneaux de la planche ; états de groupes/incidents du §18D.
+9. **Sélection cohérente avec les sprites** : l'index spatial opère sur la **géométrie logique** (position, rayon en mètres), non sur les pixels du sprite ; un sprite remplacé garde la même zone de sélection (`hitRadiusM` dans le manifeste).
+10. **Différenciation des acteurs** : `ForceKind` ∈ {`crs`, `police_nationale`, `gendarmerie_mobile`, `unite_speciale`} × `loadout` {bouclier, casque…} ; `RescueKind` ∈ {`secouriste`, `sapeur_pompier`, `equipe_medicale`} ; `VehicleKind` ∈ {fourgon_police, fourgon_crs, voiture_police, ambulance, camion_pompiers, vehicule_secours_leger, vehicule_gendarmerie, voiture_banalisee, moto_police, camion_a_eau}.
+
+## 23. Capacité de simulation et performances
+
+- **Objectif de capacité à tester : 50 000 personnes simulées**, architecture évolutive au-delà. **Aucun plafond structurel** (ni 6 000 au total, ni 600 par groupe).
+- Trois niveaux **distincts** : **individus simulés** (tableaux typés, un par personne), **sous-groupes de calcul** (blocs d'individus contigus partageant un calcul de référence), **pions dessinés** (échantillon choisi par le rendu).
+- **Niveaux de simulation** (par groupe, selon distance/foyer d'attention, densité, pertinence des événements) : *N0 agrégé* (le centre bouge, les positions sont des fonctions analytiques évaluées à la demande), *N1 sous-groupes* (repères mis à jour, individus placés par décalage), *N2 individuel* (dynamique complète). **Aucun individu ne disparaît** ; seule la finesse de mise à jour varie.
+- **Mesures obligatoires à 5 000, 10 000, 25 000 et 50 000 personnes** : temps de calcul d'un tick (moyenne/p95/max), FPS, mémoire utilisée, limites constatées. Protocole reproductible documenté ; **aucune performance promise sans mesure**, et mesures **dépendantes de la machine** clairement signalées.
+- Optimisation **progressive à partir des mesures**, jamais par réduction préventive du périmètre ; tout compromis est expliqué, mesuré, puis proposé avant adoption.
+
+## 24. Paramètres de mouvement, de densité et de blocage
+
+Tous **configurables** (`SimParams`, par scénario / type de groupe), **aucune constante définitive** :
+
+- vitesse initiale de cortège **1,1 m/s** (variable selon type de groupe, densité, arrêts, obstacles, largeur des rues) ;
+- nombre maximal de membres par groupe et nombre total d'individus : **sans plafond structurel** ;
+- **détours** : aucun facteur maximal ; un itinéraire alternatif valide est toujours recherché ; paramètre optionnel `maxDetourRatio` (désactivé par défaut) ;
+- **blocage de rue** : pas de seuil universel de 60 personnes. Calcul **géométrique** : largeur de la rue, surface occupée, densité (personnes/m²), répartition → **états intermédiaires** `libre → ralenti → partiellement obstrué → bloqué` ;
+  un véhicule passe si la largeur libre ≥ largeur du véhicule + marge ; la vitesse de marche suit une relation densité-vitesse paramétrable ;
+- itinéraires : **pas de traversée de bâtiments, pas de boucles, pas de déplacements instantanés** (validations testées) ; si aucun itinéraire satisfaisant n'existe, **le groupe reste sur place** (état « en attente » journalisé).
+
+## 25. Données OpenStreetMap et lieux (décisions v0.4)
+
+- **Pas d'anonymisation par défaut** : noms de commerces et établissements OSM affichés quand pertinent ; attributs utiles conservés (ODbL, conditions des services, attribution).
+- Données géographiques réelles et objets/événements fictifs **toujours distingués** ; dommages, incendies, pillages restent fictifs et ne sont jamais présentés comme des faits réels concernant un établissement réel ; **aucun classement de vulnérabilité**.
+- Graphe de navigation **indépendant du rendu**, issu de données routières adaptées (pas des tuiles). **Paquets préparés une fois** pour les villes prises en charge, **procédure locale documentée**, éventuel **téléchargement limité** ; conditions d'usage, attribution et obligations de redistribution respectées.
+- **Sans graphe réel cohérent avec la carte affichée : fond schématique** (jamais de rues de jeu mal alignées sur la carte).
+
+## 26. Architecture et interactions
+
+Inchangée (TypeScript/Vite/Preact, Canvas 2D, MapLibre) sauf justification technique démontrée. Exigences : coordonnées de simulation indépendantes de l'écran ; **index spatial** pour sélectionner individus et objets ; séparation moteur / navigation / données géographiques / rendu / interface ; **ordres simultanés** ; pause complète et reprise ; sélection cohérente avec les futurs sprites ; journal explicatif ; tests et benchmarks reproductibles.
+
+## 27. Organisation : validation intermédiaire à mi-phase 3
+
+La phase 3 est découpée : **3a** navigation (graphe, A*, états de rues, données OSM sur fixtures, graphe schématique) ; **3b** noyau du moteur (horloge, journal causal, groupes, individus à grande échelle, niveaux de simulation, benchmarks) → **VALIDATION INTERMÉDIAIRE** (fonctionnalités, tests et résultats, benchmarks et limites, problèmes restants, décisions à arbitrer) ; **3c** unités/véhicules, ordres, scénario de démonstration, intégration carte/UI ; **3d** interfaces de sprites, finition, documentation. Aucune phase suivante sans validation. **Aucun commit/push/PR sans autorisation explicite.**
+
