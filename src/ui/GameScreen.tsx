@@ -3,27 +3,22 @@ import { LocalFrame, zoomForBounds, type Bounds, type LngLat, type Vec2, type Vi
 import { PRESET_CITIES } from '../geo/cities';
 import { DEFAULT_ZOOM, MAP_PROVIDERS, type MapProviderId } from '../config/mapConfig';
 import type { Settings } from '../config/settings';
-import {
-  ZONE_LEVELS,
-  applyDemoEvent,
-  blockedSegmentIds,
-  computeStats,
-  makeDemo,
-  pruneBanners,
-  pushLog,
-  type DemoState,
-} from '../demo/demoScenario';
+import { GameController } from '../game/controller';
+import { provideWorld, type WorldKind } from '../game/world';
+import { DEFAULT_ZONE_LEVEL, ZONE_LEVELS } from '../game/zones';
+import type { EntityRef } from '../game/selection';
+import type { LogEvent } from '../engine/types';
 import { MapLibreAdapter } from '../map/MapLibreAdapter';
 import { SchematicAdapter } from '../map/SchematicAdapter';
 import type { MapAdapter, MapStatus } from '../map/MapAdapter';
 import { GameRenderer } from '../render/GameRenderer';
-import type { City, EntityRef, StreetSegment } from '../state/types';
+import { pixelsPerMeter } from '../geo/mercator';
+import type { City } from '../state/types';
 import { CitySearch } from './CitySearch';
-import { DetailPanel, ForcesPanel, LogPanel, ObjectivesPanel, TopBar } from './panels';
+import { DetailPanel, ForcesPanel, LogPanel, TopBar } from './panels';
 
 export interface DebugFlags {
   debug: boolean;
-  extraGroups: number;
   providerOverride?: MapProviderId;
 }
 
@@ -35,11 +30,21 @@ interface Props {
   onExit: () => void;
 }
 
-type MapKind = 'maplibre' | 'schematic';
 interface Notice {
   level: 'warn' | 'error';
   text: string;
+  /** `world` : fond/graphe de simulation ; `map` : état des tuiles ou du réseau. */
+  source: 'world' | 'map';
 }
+interface Banner {
+  id: number;
+  level: LogEvent['level'];
+  text: string;
+  until: number;
+}
+
+/** Événements du journal annoncés par un bandeau (les autres restent dans le journal). */
+const BANNER_CODES = new Set(['group.created', 'group.arriving', 'group.settled', 'group.split', 'group.joined', 'group.dispersing', 'edge.closed', 'edge.opened', 'group.rerouted', 'group.waiting', 'unit.waiting']);
 
 function zoneBounds(frame: LocalFrame, zi: number): Bounds {
   const z = ZONE_LEVELS[zi] as (typeof ZONE_LEVELS)[number];
@@ -48,71 +53,68 @@ function zoneBounds(frame: LocalFrame, zi: number): Bounds {
   return { west: sw.lng, south: sw.lat, east: ne.lng, north: ne.lat };
 }
 
-/** Zoom qui cadre la zone de jeu (avec marge) dans la vue courante de l'adaptateur. */
 function zoomToFitZone(adapter: MapAdapter, frame: LocalFrame, zi: number, padding = 48): number {
   const v = adapter.getView();
   const z = zoomForBounds(zoneBounds(frame, zi), v.width, v.height, padding);
   return Math.max(12, Math.min(18, z));
 }
 
-function mergeSegments(prev: StreetSegment[], next: StreetSegment[]): StreetSegment[] {
-  const m = new Map(prev.map((s) => [s.id, s]));
-  for (const s of next) m.set(s.id, s);
-  return [...m.values()];
-}
-
 export function GameScreen({ city: initialCity, settings, debug, onSettings, onExit }: Props) {
   const [city, setCity] = useState<City>(initialCity);
-  const [mapKind, setMapKind] = useState<MapKind>(settings.preferSchematic ? 'schematic' : 'maplibre');
+  const [mapKind, setMapKind] = useState<WorldKind>(settings.preferSchematic ? 'schematic' : 'osm');
   const [mapStatus, setMapStatus] = useState<MapStatus>({ state: 'loading' });
   const [notice, setNotice] = useState<Notice | null>(null);
-  const [zoneLevel, setZoneLevel] = useState(0);
-  const [selection, setSelection] = useState<EntityRef | null>(null);
-  const [segments, setSegments] = useState<StreetSegment[]>([]);
+  const [zoneLevel, setZoneLevel] = useState(DEFAULT_ZONE_LEVEL);
   const [tactical, setTactical] = useState(settings.tacticalLook);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [nowMs, setNowMs] = useState(() => Date.now());
-  const startRef = useRef(Date.now());
-  const [demo, setDemo] = useState<DemoState>(() => makeDemo(initialCity, Date.now(), { extraGroups: debug.extraGroups }));
+  const [orderMode, setOrderMode] = useState(false);
+  const [ctrl, setCtrl] = useState<GameController | null>(null);
+  const [, setRev] = useState(0);
+  const [banners, setBanners] = useState<Banner[]>([]);
 
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const adapterRef = useRef<MapAdapter | null>(null);
   const rendererRef = useRef<GameRenderer | null>(null);
+  const ctrlRef = useRef<GameController | null>(null);
   const cityRef = useRef(city);
-  const zoneRef = useRef(zoneLevel);
+  const orderModeRef = useRef(orderMode);
   const lastViewRef = useRef<{ center: LngLat; zoom: number } | null>(null);
-  const segTimer = useRef<number>(0);
+  const bannerId = useRef(0);
   cityRef.current = city;
-  zoneRef.current = zoneLevel;
+  orderModeRef.current = orderMode;
+  ctrlRef.current = ctrl;
 
   const provider: MapProviderId = debug.providerOverride ?? settings.provider;
   const frame = useMemo(() => new LocalFrame(city.center), [city]);
+  const frameRef = useRef(frame);
+  frameRef.current = frame;
   const zone = ZONE_LEVELS[zoneLevel] as (typeof ZONE_LEVELS)[number];
-  const blocked = useMemo(() => blockedSegmentIds(segments, demo.groups), [segments, demo.groups]);
-  const stats = useMemo(() => computeStats(demo, segments, blocked), [demo, segments, blocked]);
 
-  const log = useCallback((level: 'info' | 'warn' | 'alert', text: string) => {
-    setDemo((d) => pushLog(d, Date.now(), level, text));
-  }, []);
-
-  // ---- segments de rues de la zone (recalculés après chaque stabilisation de la caméra)
-  const refreshSegments = useCallback(() => {
-    const adapter = adapterRef.current;
-    if (!adapter) return;
-    const c = cityRef.current;
-    const z = ZONE_LEVELS[zoneRef.current] as (typeof ZONE_LEVELS)[number];
-    const found = adapter.getStreetSegments(new LocalFrame(c.center), z);
-    setSegments((prev) => (adapter.kind === 'schematic' ? found : mergeSegments(prev, found).filter((s) => s.points.every((p) => Math.abs(p.x) <= z.halfWidth && Math.abs(p.y) <= z.halfHeight))));
-  }, []);
-  const scheduleSegments = useCallback(
-    (delay = 450) => {
-      window.clearTimeout(segTimer.current);
-      segTimer.current = window.setTimeout(refreshSegments, delay);
-    },
-    [refreshSegments],
-  );
+  // ---- moteur : (re)création quand la ville ou le type de fond change (le graphe doit correspondre au fond affiché)
+  useEffect(() => {
+    let cancelled = false;
+    setCtrl(null);
+    setBanners([]);
+    setOrderMode(false);
+    // fournisseur de test local (debug) : le fond n'est pas une carte réelle, on simule sur le graphe schématique
+    const want: WorldKind = debug.providerOverride ? 'schematic' : mapKind;
+    provideWorld(city, want).then((w) => {
+      if (cancelled) return;
+      if (w.kind !== want) {
+        if (w.notice) setNotice({ level: 'warn', text: w.notice, source: 'world' });
+        setMapKind(w.kind);
+        return;
+      }
+      const c = new GameController({ graph: w.graph, zoneLevel });
+      setCtrl(c);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [city, mapKind]);
 
   // ---- cycle de vie de l'adaptateur de carte
   useEffect(() => {
@@ -126,48 +128,34 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
       adapter =
         mapKind === 'schematic'
           ? new SchematicAdapter(host, start.center, start.zoom)
-          : new MapLibreAdapter(host, {
-              provider,
-              customStyleUrl: settings.customStyleUrl,
-              center: start.center,
-              zoom: start.zoom,
-              tactical,
-            });
+          : new MapLibreAdapter(host, { provider, customStyleUrl: settings.customStyleUrl, center: start.center, zoom: start.zoom, tactical });
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
-      setNotice({ level: 'error', text: `Carte indisponible (${reason}). Passage en mode schématique.` });
-      log('alert', `Carte indisponible : ${reason}. Bascule en mode schématique.`);
+      setNotice({ level: 'error', text: `Carte indisponible (${reason}). Passage en mode schématique.`, source: 'map' });
       host.replaceChildren();
       if (mapKind !== 'schematic') setMapKind('schematic');
       return;
     }
     adapter.setScenarioOrigin(c.center);
     adapterRef.current = adapter;
-    if (!lastViewRef.current) adapter.jumpTo(c.center, zoomToFitZone(adapter, new LocalFrame(c.center), zoneRef.current));
-    setSegments([]);
+    if (!lastViewRef.current) adapter.jumpTo(c.center, zoomToFitZone(adapter, new LocalFrame(c.center), zoneLevel));
     const offMove = adapter.onMove(() => {
       const v = adapter.getView();
       lastViewRef.current = { center: { lng: v.lng, lat: v.lat }, zoom: v.zoom };
       rendererRef.current?.draw(performance.now());
-      if (adapter.kind === 'maplibre') scheduleSegments(700);
     });
     const offStatus = adapter.onStatus((s) => {
       setMapStatus(s);
-      if (s.state === 'degraded') setNotice({ level: 'warn', text: s.reason });
-      if (s.state === 'ready') {
-        setNotice((n) => (n && n.level === 'warn' ? null : n));
-        scheduleSegments(adapter.kind === 'schematic' ? 0 : 900);
-      }
+      if (s.state === 'degraded') setNotice({ level: 'warn', text: s.reason, source: 'map' });
+      if (s.state === 'ready') setNotice((n) => (n && n.source === 'map' && n.level === 'warn' ? null : n));
     });
     adapter.ready.catch((err: unknown) => {
       if (adapterRef.current !== adapter) return;
       const reason = err instanceof Error ? err.message : String(err);
-      setNotice({ level: 'error', text: `${reason} Bascule automatique vers le mode schématique.` });
-      log('alert', 'Service cartographique indisponible : bascule en mode schématique.');
+      setNotice({ level: 'error', text: `${reason} Bascule automatique vers le fond schématique (la simulation redémarre sur le graphe schématique).`, source: 'map' });
       setMapKind('schematic');
     });
     return () => {
-      window.clearTimeout(segTimer.current);
       offMove();
       offStatus();
       adapter.destroy();
@@ -178,12 +166,21 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
 
   useEffect(() => adapterRef.current?.setTactical(tactical), [tactical, mapKind]);
 
-  // ---- couche de rendu du jeu
+  // ---- couche de rendu : l'horloge de jeu est avancée par la boucle d'affichage
   useEffect(() => {
     const canvas = canvasRef.current as HTMLCanvasElement;
     const fallback: ViewState = { lng: 0, lat: 0, zoom: 1, width: 1, height: 1 };
     const renderer = new GameRenderer(canvas, () => adapterRef.current?.getView() ?? fallback);
     rendererRef.current = renderer;
+    renderer.beforeDraw = (dt) => {
+      const c = ctrlRef.current;
+      const v = adapterRef.current?.getView();
+      if (!c || !v) return;
+      // foyer d'attention = ce que le joueur voit (centre de la vue, demi-diagonale)
+      const centre = frameRef.current.toMeters({ lng: v.lng, lat: v.lat });
+      c.setView(centre, Math.hypot(v.width, v.height) / 2 / pixelsPerMeter(v.lat, v.zoom));
+      c.advance(dt);
+    };
     renderer.start();
     return () => {
       renderer.stop();
@@ -192,20 +189,14 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
   }, []);
 
   useEffect(() => {
-    rendererRef.current?.setSnapshot({
-      origin: city.center,
-      zone,
-      units: demo.units,
-      vehicles: demo.vehicles,
-      groups: demo.groups,
-      incidents: demo.incidents,
-      segments,
-      blockedSegmentIds: blocked,
-      selection,
-    });
-  }, [city, zone, demo, segments, blocked, selection]);
+    rendererRef.current?.setController(ctrl, city.center);
+  }, [ctrl, city]);
+  useEffect(() => {
+    rendererRef.current?.setZone(zone);
+    ctrlRef.current?.setZoneLevel(zoneLevel);
+  }, [zone, zoneLevel, ctrl]);
 
-  // ---- changement de ville : saut de caméra + régénération complète des pions
+  // ---- changement de ville : saut de caméra
   const firstCity = useRef(true);
   useEffect(() => {
     if (firstCity.current) {
@@ -213,29 +204,25 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
       return;
     }
     const adapter = adapterRef.current;
-    setSelection(null);
-    setSegments([]);
-    setDemo(makeDemo(city, Date.now(), { extraGroups: debug.extraGroups }));
     adapter?.setScenarioOrigin(city.center);
-    if (adapter) adapter.jumpTo(city.center, zoomToFitZone(adapter, new LocalFrame(city.center), zoneRef.current));
-    scheduleSegments(adapter?.kind === 'schematic' ? 0 : 1200);
+    if (adapter) adapter.jumpTo(city.center, zoomToFitZone(adapter, new LocalFrame(city.center), zoneLevel));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [city]);
 
-  useEffect(() => {
-    setSegments([]);
-    scheduleSegments(adapterRef.current?.kind === 'schematic' ? 0 : 300);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [zoneLevel]);
-
-  // ---- horloge d'affichage, bandeaux, connexion réseau
+  // ---- rafraîchissement de l'interface (4 Hz), bandeaux, connexion réseau
   useEffect(() => {
     const id = window.setInterval(() => {
-      const n = Date.now();
-      setNowMs(n);
-      setDemo((d) => pruneBanners(d, n));
-    }, 500);
-    const off = () => setNotice({ level: 'warn', text: 'Connexion Internet perdue : les tuiles non chargées resteront vides. Vous pouvez passer au fond schématique.' });
+      const c = ctrlRef.current;
+      const now = Date.now();
+      if (c) {
+        const fresh = c.newEvents().filter((e) => BANNER_CODES.has(e.code) || e.level !== 'info');
+        if (fresh.length) {
+          setBanners((b) => [...b.filter((x) => x.until > now), ...fresh.slice(-2).map((e) => ({ id: ++bannerId.current, level: e.level, text: e.text, until: now + 6000 }))].slice(-2));
+        } else setBanners((b) => (b.some((x) => x.until <= now) ? b.filter((x) => x.until > now) : b));
+      }
+      setRev((r) => r + 1);
+    }, 250);
+    const off = () => setNotice({ level: 'warn', text: 'Connexion Internet perdue : les tuiles non chargées resteront vides. Vous pouvez passer au fond schématique.', source: 'map' });
     const on = () => setNotice((n) => (n?.text.startsWith('Connexion Internet perdue') ? null : n));
     window.addEventListener('offline', off);
     window.addEventListener('online', on);
@@ -246,16 +233,22 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
     };
   }, []);
 
-  // ---- interactions pions (clic = sélection ; survol = surbrillance)
+  // ---- interactions (clic = sélection ; clic droit = ordre ; survol)
   useEffect(() => {
     const wrap = wrapRef.current as HTMLDivElement;
     let down: Vec2 | null = null;
-    const local = (e: PointerEvent): Vec2 => {
+    let lastHover = 0;
+    const local = (e: PointerEvent | MouseEvent): Vec2 => {
       const r = wrap.getBoundingClientRect();
       return { x: e.clientX - r.left, y: e.clientY - r.top };
     };
+    const world = (p: Vec2) => {
+      const r = rendererRef.current;
+      const w = r?.toWorld(p);
+      return r && w ? { w, tol: 14 * r.metersPerPixel() } : null;
+    };
     const onDown = (e: PointerEvent) => {
-      if ((e.target as HTMLElement).closest('.map-ui')) return;
+      if (e.button !== 0 || (e.target as HTMLElement).closest('.map-ui')) return;
       down = local(e);
     };
     const onUp = (e: PointerEvent) => {
@@ -263,30 +256,71 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
       const p = local(e);
       const moved = Math.hypot(p.x - down.x, p.y - down.y);
       down = null;
-      if (moved > 5 || (e.target as HTMLElement).closest('.map-ui')) return;
-      setSelection(rendererRef.current?.hit(p) ?? null);
+      const c = ctrlRef.current;
+      if (moved > 5 || !c || (e.target as HTMLElement).closest('.map-ui')) return;
+      const at = world(p);
+      if (!at) return;
+      if (orderModeRef.current) {
+        c.orderMove(at.w);
+        setOrderMode(false);
+      } else c.select(c.pick(at.w, at.tol, true), e.shiftKey);
+      setRev((r) => r + 1);
+    };
+    const onContext = (e: MouseEvent) => {
+      if ((e.target as HTMLElement).closest('.map-ui')) return;
+      e.preventDefault();
+      const c = ctrlRef.current;
+      const at = world(local(e));
+      if (!c || !at) return;
+      // clic droit sur une unité non sélectionnée : on la sélectionne d'abord (confort), sinon ordre de déplacement
+      if (!c.selectedMovers().length) {
+        const hit = c.pick(at.w, at.tol, false);
+        if (hit && hit.type !== 'group') c.select(hit);
+      } else c.orderMove(at.w);
+      setRev((r) => r + 1);
     };
     const onMove = (e: PointerEvent) => {
+      const r = rendererRef.current;
+      const c = ctrlRef.current;
+      if (!r || !c) return;
+      const now = performance.now();
+      if (now - lastHover < 60) return;
+      lastHover = now;
       if (e.buttons || (e.target as HTMLElement).closest('.map-ui')) {
-        rendererRef.current?.setHover(null);
+        r.hover = null;
         wrap.classList.remove('hit-hover');
         return;
       }
-      const h = rendererRef.current?.hit(local(e)) ?? null;
-      rendererRef.current?.setHover(h ? h.id : null);
+      const at = world(local(e));
+      const h: EntityRef | null = at ? c.pick(at.w, at.tol, false) : null;
+      r.hover = h;
       wrap.classList.toggle('hit-hover', !!h);
+      wrap.classList.toggle('order-mode', orderModeRef.current);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setSelection(null);
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+      const c = ctrlRef.current;
+      if (e.key === 'Escape') {
+        setOrderMode(false);
+        c?.select(null);
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && c) c.cancelOrders();
+      else if (e.key === ' ' && c) {
+        e.preventDefault();
+        c.setSpeed(c.speed === 0 ? 1 : 0);
+      }
+      setRev((r) => r + 1);
     };
     wrap.addEventListener('pointerdown', onDown, true);
     wrap.addEventListener('pointerup', onUp, true);
     wrap.addEventListener('pointermove', onMove);
+    wrap.addEventListener('contextmenu', onContext);
     window.addEventListener('keydown', onKey);
     return () => {
       wrap.removeEventListener('pointerdown', onDown, true);
       wrap.removeEventListener('pointerup', onUp, true);
       wrap.removeEventListener('pointermove', onMove);
+      wrap.removeEventListener('contextmenu', onContext);
       window.removeEventListener('keydown', onKey);
     };
   }, []);
@@ -302,8 +336,12 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
       get status() {
         return mapStatus;
       },
+      get ctrl() {
+        return ctrlRef.current;
+      },
       getView: () => adapterRef.current?.getView(),
       nativeProject: (m: Vec2) => adapterRef.current?.debugProject?.(frame.toLngLat(m)),
+      toScreen: (m: Vec2) => rendererRef.current?.toScreen(m),
       targets: () => rendererRef.current?.getTargets(),
       stats: () => rendererRef.current?.getStats(),
       resetStats: () => rendererRef.current?.resetStats(),
@@ -312,8 +350,6 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
         sk?.clear();
         layers.forEach((l) => sk?.add(l));
       },
-      entities: () => ({ units: demo.units, vehicles: demo.vehicles, groups: demo.groups, incidents: demo.incidents }),
-      counters: () => stats,
       city: () => cityRef.current,
       jumpTo: (lng: number, lat: number, zoom: number) => adapterRef.current?.jumpTo({ lng, lat }, zoom),
       zone: () => ({ level: zoneLevel, ...zone }),
@@ -333,20 +369,15 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
     [frame],
   );
   const select = useCallback(
-    (ref: EntityRef, center = true) => {
-      setSelection(ref);
-      if (!center) return;
-      const pos =
-        ref.type === 'unit'
-          ? demo.units.find((u) => u.id === ref.id)?.pos
-          : ref.type === 'vehicle'
-            ? demo.vehicles.find((v) => v.id === ref.id)?.pos
-            : ref.type === 'group'
-              ? demo.groups.find((g) => g.id === ref.id)?.pos
-              : demo.incidents.find((i) => i.id === ref.id)?.pos;
-      if (pos) centerOn(pos);
+    (ref: EntityRef, additive: boolean) => {
+      const c = ctrlRef.current;
+      if (!c) return;
+      c.select(ref, additive);
+      const pos = c.positionOf(ref);
+      if (pos && !additive) centerOn(pos);
+      setRev((r) => r + 1);
     },
-    [demo, centerOn],
+    [centerOn],
   );
   const changeZone = (next: number) => {
     setZoneLevel(next);
@@ -355,7 +386,7 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
   };
   const fitZone = () => adapterRef.current?.fitBounds(zoneBounds(frame, zoneLevel), 90);
   const switchMap = () => {
-    const next: MapKind = mapKind === 'maplibre' ? 'schematic' : 'maplibre';
+    const next: WorldKind = mapKind === 'osm' ? 'schematic' : 'osm';
     setNotice(null);
     setMapKind(next);
     onSettings({ ...settings, preferSchematic: next === 'schematic' });
@@ -365,54 +396,59 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
     setSearchOpen(false);
   };
 
-  const mapLabel =
-    mapKind === 'schematic'
-      ? 'Fond schématique (hors ligne)'
-      : `Carte OSM — ${MAP_PROVIDERS[provider].label.split(' (')[0]}`;
-  const elapsed = Math.max(0, Math.floor((nowMs - startRef.current) / 1000));
+  const mapLabel = mapKind === 'schematic' ? 'Fond schématique (hors ligne)' : `Carte OSM — ${MAP_PROVIDERS[provider].label.split(' (')[0]}`;
+  const adapterKind = mapKind === 'schematic' ? 'schematic' : 'maplibre';
+  const loadingWorld = !ctrl;
 
   return (
-    <div class="game" data-testid="game" data-map-kind={mapKind} data-map-state={mapStatus.state}>
-      <TopBar
-        cityName={city.name}
-        presetCities={PRESET_CITIES}
-        cityId={city.id}
-        onCity={pickCity}
-        onToggleSearch={() => setSearchOpen((v) => !v)}
-        onExit={onExit}
-        stats={stats}
-        elapsed={elapsed}
-      />
+    <div class="game" data-testid="game" data-map-kind={adapterKind} data-map-state={mapStatus.state} data-engine={ctrl ? 'ready' : 'loading'}>
+      {ctrl ? (
+        <TopBar
+          ctrl={ctrl}
+          cityName={city.name}
+          presetCities={PRESET_CITIES}
+          cityId={city.id}
+          onCity={pickCity}
+          onToggleSearch={() => setSearchOpen((v) => !v)}
+          onExit={onExit}
+          onSpeed={(s) => {
+            ctrl.setSpeed(s);
+            setRev((r) => r + 1);
+          }}
+        />
+      ) : (
+        <header class="topbar">
+          <div class="brand">
+            <button type="button" class="ghost" onClick={onExit} data-testid="exit">
+              ← Accueil
+            </button>
+            <strong>ORDRE PUBLIC</strong>
+          </div>
+          <span class="muted">Préparation de la simulation…</span>
+        </header>
+      )}
       {searchOpen && (
         <div class="search-pop map-ui" data-testid="search-pop">
           <CitySearch geocoderUrl={settings.geocoderUrl} onPick={pickCity} compact />
         </div>
       )}
-      <aside class="side left">
-        <ForcesPanel
-          units={demo.units}
-          vehicles={demo.vehicles}
-          groups={demo.groups}
-          selection={selection}
-          onSelect={(r) => select(r)}
-        />
-      </aside>
+      <aside class="side left">{ctrl && <ForcesPanel ctrl={ctrl} onSelect={select} />}</aside>
 
-      <section class="map-area" ref={wrapRef} aria-label="Carte de la zone de jeu">
+      <section class={`map-area ${orderMode ? 'order-mode' : ''}`} ref={wrapRef} aria-label="Carte de la zone de jeu">
         <div class={`map-host ${tactical ? 'tactical' : ''}`} ref={hostRef} data-testid="map-host" />
         <canvas class="game-layer" ref={canvasRef} data-testid="game-layer" aria-hidden="true" />
 
         <div class="banners map-ui" aria-live="polite">
-          {demo.banners.map((b) => (
+          {banners.map((b) => (
             <div key={b.id} class={`banner ${b.level}`} data-testid="banner">
               {b.text}
             </div>
           ))}
         </div>
 
-        {(notice || mapStatus.state === 'loading') && (
+        {(notice || mapStatus.state === 'loading' || loadingWorld) && (
           <div class={`map-notice map-ui ${notice?.level ?? 'info'}`} role="status" data-testid="map-notice">
-            <span>{notice ? notice.text : 'Chargement de la carte…'}</span>
+            <span>{notice ? notice.text : loadingWorld ? 'Préparation de la simulation…' : 'Chargement de la carte…'}</span>
             {notice && mapKind === 'schematic' && (
               <button type="button" onClick={switchMap} data-testid="retry-map">
                 Réessayer la carte OSM
@@ -439,54 +475,48 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
             </button>
           </div>
           <div class="ctl-group zone" role="group" aria-label="Taille de la zone de jeu">
-            <button
-              type="button"
-              aria-label="Réduire la zone"
-              disabled={zoneLevel === 0}
-              data-testid="zone-shrink"
-              onClick={() => {
-                changeZone(zoneLevel - 1);
-                log('info', `Zone de jeu réduite à ${ZONE_LEVELS[zoneLevel - 1]!.halfWidth * 2} × ${ZONE_LEVELS[zoneLevel - 1]!.halfHeight * 2} m.`);
-              }}
-            >
+            <button type="button" aria-label="Réduire la zone" disabled={zoneLevel === 0} data-testid="zone-shrink" onClick={() => changeZone(zoneLevel - 1)}>
               ◂
             </button>
             <span data-testid="zone-size" title="Zone de jeu (largeur × hauteur)">
               {zone.halfWidth * 2}×{zone.halfHeight * 2} m
             </span>
-            <button
-              type="button"
-              aria-label="Étendre la zone"
-              disabled={zoneLevel === ZONE_LEVELS.length - 1}
-              data-testid="zone-grow"
-              onClick={() => {
-                changeZone(zoneLevel + 1);
-                log('info', `Zone de jeu étendue à ${ZONE_LEVELS[zoneLevel + 1]!.halfWidth * 2} × ${ZONE_LEVELS[zoneLevel + 1]!.halfHeight * 2} m.`);
-              }}
-            >
+            <button type="button" aria-label="Étendre la zone" disabled={zoneLevel === ZONE_LEVELS.length - 1} data-testid="zone-grow" onClick={() => changeZone(zoneLevel + 1)}>
               ▸
             </button>
           </div>
         </div>
 
         <div class="map-bottom map-ui">
-          <button type="button" class="primary" data-testid="demo-event" onClick={() => setDemo((d) => applyDemoEvent(d, Date.now(), zone))}>
-            Déclencher un événement de démonstration
-          </button>
-          <button type="button" data-testid="switch-map" onClick={switchMap} title="Basculer entre la carte OSM et le fond schématique">
+          <button type="button" data-testid="switch-map" onClick={switchMap} title="Basculer entre la carte OSM et le fond schématique (la simulation redémarre)">
             Fond : {mapLabel}
           </button>
           <label class="check small">
             <input type="checkbox" checked={tactical} disabled={mapKind === 'schematic'} onChange={(e) => setTactical((e.target as HTMLInputElement).checked)} />
             Vue tactique
           </label>
+          <span class="legend small" aria-label="Légende des états de rue">
+            <i class="sw slowed" /> ralentie <i class="sw partial" /> obstruée <i class="sw blocked" /> bloquée
+          </span>
         </div>
       </section>
 
       <aside class="side right">
-        <DetailPanel selection={selection} demo={demo} onCenter={centerOn} onClose={() => setSelection(null)} />
-        <ObjectivesPanel stats={stats} demo={demo} />
-        <LogPanel entries={demo.log} startMs={startRef.current} />
+        {ctrl && (
+          <>
+            <DetailPanel
+              ctrl={ctrl}
+              orderMode={orderMode}
+              onOrderMode={setOrderMode}
+              onCenter={centerOn}
+              onClose={() => {
+                ctrl.select(null);
+                setRev((r) => r + 1);
+              }}
+            />
+            <LogPanel events={ctrl.sim.journal.events} />
+          </>
+        )}
       </aside>
     </div>
   );

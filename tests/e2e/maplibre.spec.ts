@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
-import { alignmentErrors, mapBox, openGame, targets, view } from './helpers';
+import { alignmentErrors, mapBox, openGame, servePack, targets, view } from './helpers';
+
+const METZ = { lng: 6.1757, lat: 49.1193 };
 
 // Fond MapLibre sans réseau : style local (fond uni + quadrillage) → teste le calage réel avec WebGL.
 test.describe('carte MapLibre (style local de test)', () => {
@@ -46,9 +48,9 @@ test.describe('carte MapLibre (style local de test)', () => {
     await page.getByTestId('zoom-in').click();
     const worst = await page.evaluate(async () => {
       const dbg = (window as any).__ORDRE__;
+      dbg.ctrl.setSpeed(0);
       const pos = new Map<string, { x: number; y: number }>();
-      const ents = dbg.entities();
-      for (const k of ['units', 'vehicles', 'groups', 'incidents']) for (const e of ents[k]) pos.set(e.id, e.pos);
+      for (const e of [...dbg.ctrl.sim.units, ...dbg.ctrl.sim.vehicles]) pos.set(e.id, { x: e.x, y: e.y });
       let max = 0;
       let n = 0;
       const t0 = performance.now();
@@ -110,23 +112,34 @@ test.describe('fournisseur OpenStreetMap par défaut', () => {
         }),
       }),
     );
+    await servePack(page, 'metz', METZ);
     await openGame(page, 'autostart=metz');
     await expect(page.getByTestId('game')).toHaveAttribute('data-map-kind', 'maplibre');
     await expect(page.locator('.maplibregl-ctrl-attrib')).toContainText('OpenStreetMap');
   });
 
+  test('sans paquet OSM préparé : le fond schématique est utilisé et le message l’explique', async ({ page }) => {
+    await page.route(STYLE, (route) => route.abort('failed'));
+    await page.goto('/?debug&autostart=metz');
+    await expect(page.getByTestId('game')).toHaveAttribute('data-map-kind', 'schematic', { timeout: 20_000 });
+    await expect(page.getByTestId('game')).toHaveAttribute('data-engine', 'ready', { timeout: 20_000 });
+    await expect(page.getByTestId('map-notice')).toContainText('schématique');
+  });
+
   test('service de carte injoignable : message clair puis bascule automatique en mode schématique', async ({ page }) => {
+    await servePack(page, 'metz', METZ);
     await page.route(STYLE, (route) => route.abort('failed'));
     await page.goto('/?debug&autostart=metz');
     await expect(page.getByTestId('game')).toHaveAttribute('data-map-kind', 'schematic', { timeout: 20_000 });
     await expect(page.getByTestId('map-notice')).toContainText('schématique');
     await expect(page.getByTestId('retry-map')).toBeVisible();
-    await expect(page.getByTestId('log-panel')).toContainText('mode schématique');
+    await expect(page.getByTestId('game')).toHaveAttribute('data-engine', 'ready', { timeout: 20_000 });
     // le jeu reste pleinement utilisable après la bascule
     expect((await targets(page)).length).toBeGreaterThan(5);
   });
 
   test('style invalide (HTTP 500) : même repli', async ({ page }) => {
+    await servePack(page, 'metz', METZ);
     await page.route(STYLE, (route) => route.fulfill({ status: 500, body: 'erreur' }));
     await page.goto('/?debug&autostart=metz');
     await expect(page.getByTestId('game')).toHaveAttribute('data-map-kind', 'schematic', { timeout: 20_000 });
@@ -147,6 +160,7 @@ test.describe('fournisseur OpenStreetMap par défaut', () => {
       }),
     );
     await page.route('https://tuiles-indisponibles.example/**', (route) => route.abort('failed'));
+    await servePack(page, 'metz', METZ);
     await page.goto('/?debug&autostart=metz');
     await expect(page.getByTestId('map-notice')).toContainText('tuiles', { timeout: 20_000 });
     await expect(page.getByTestId('game')).toHaveAttribute('data-map-kind', 'maplibre');

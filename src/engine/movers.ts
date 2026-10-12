@@ -21,6 +21,10 @@ export interface MoverDeps {
 }
 
 const loc: Located = { x: 0, y: 0, tx: 0, ty: 0, seg: 0 };
+export const deltaText = (d: number): string => {
+  const r = Math.round(d);
+  return r === 0 ? 'longueur inchangée' : `${r > 0 ? '+' : ''}${r} m`;
+};
 const wrapAngle = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 
 /**
@@ -211,7 +215,7 @@ export class MoverSystem {
           e.status = 'moving';
           e.waitingSinceMs = null;
         }
-        this.d.log('info', 'unit.rerouted', `${e.callsign} : ${name} bloquée, itinéraire modifié (${added >= 0 ? '+' : ''}${Math.round(added)} m).`, why, { type: this.subjectType(e), id: e.id }, { deltaM: Math.round(added) });
+        this.d.log('info', 'unit.rerouted', `${e.callsign} : ${name} bloquée, itinéraire modifié (${deltaText(added)}).`, why, { type: this.subjectType(e), id: e.id }, { deltaM: Math.round(added) });
         return;
       }
     }

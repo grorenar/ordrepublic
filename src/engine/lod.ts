@@ -54,7 +54,8 @@ export function selectBlockLevels(g: CrowdGroup, foci: readonly Focus[], lod: Si
   const cursor = new RouteCursor(route);
   for (let b = 0; b < nb; b++) {
     const mid = Math.min(n - 1, Math.floor((b + 0.5) * size));
-    const s = Math.max(0, Math.min(route.length, g.sCentre + columnOffset(mid, n, g.columnLength)));
+    // pas de borne basse : derrière le point d'entrée, la colonne se prolonge en ligne droite (comme les positions réelles)
+    const s = Math.min(route.length, g.sCentre + columnOffset(mid, n, g.columnLength));
     cursor.at(s, cur);
     bl.level[b] = levelFor(distanceToFoci(cur.x, cur.y, foci), lod, bl.level[b] as SimLevel);
   }

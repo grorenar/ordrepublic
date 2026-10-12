@@ -167,3 +167,23 @@ describe('niveaux par bloc dans un très gros cortège', () => {
     expect(small.blocks).toBeNull();
   });
 });
+
+describe('colonne entrant par une porte de la zone (entièrement derrière le départ de la route)', () => {
+  it('les blocs éloignés du foyer, derrière le point d’entrée, ne sont pas traités comme proches', () => {
+    const sim = makeSim({ params: { lod: { n2RadiusM: 150, n1RadiusM: 450, blockSize: 256, blockMinGroupSize: 4000 } } });
+    const g = sim.group(sim.createGroup({ ...giant(50000), entry: 'gateway' }, PLAN))!;
+    locate(g.route!, 0, loc);
+    sim.setFoci([{ x: loc.x, y: loc.y, radius: 40 }]); // foyer au point d'entrée ; la colonne s'étend sur ~1,8 km derrière
+    sim.run(30);
+    const h = [0, 0, 0];
+    for (const l of g.blocks!.level) h[l]!++;
+    expect(g.columnLength).toBeGreaterThan(1500);
+    expect(h[2]).toBeGreaterThan(0);
+    expect(h[1]).toBeGreaterThan(0);
+    expect(h[0]).toBeGreaterThan(0);
+    // la tête de colonne (proche du foyer) est en N2, la queue (≈1,8 km) en N0
+    expect(g.blocks!.level[g.blocks!.level.length - 1]).toBe(2);
+    expect(g.blocks!.level[0]).toBe(0);
+  });
+});
+

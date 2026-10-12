@@ -187,7 +187,7 @@ const nq = stats(qs);
 // --- rapport -----------------------------------------------------------------------
 const cpu = os.cpus()[0]?.model ?? 'inconnu';
 const lines: string[] = [];
-lines.push('# Benchmarks du moteur de simulation (phase 3, mi-parcours)');
+lines.push('# Benchmarks du moteur de simulation (phase 3c)');
 lines.push('');
 lines.push('> Généré par `npm run bench:engine` — **valeurs dépendantes de la machine**, à reproduire sur la vôtre.');
 lines.push('');

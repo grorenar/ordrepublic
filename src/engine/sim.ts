@@ -17,7 +17,7 @@ import { WalkMask } from '../nav/walkMask';
 import { createLayout, extendLayout, snapToWalkable } from './layout';
 import { levelFor, distanceToFoci, selectBlockLevels, usesBlocks } from './lod';
 import { Journal, pushHistory } from './journal';
-import { MoverSystem } from './movers';
+import { MoverSystem, deltaText } from './movers';
 import { concatMembers, createMembers, sliceMembers } from './members';
 import { computeTargets, evaluateNow, frameEntry, goneCount, routeFrame, updateMembers, type MotionCtx } from './motion';
 import { withParams, type DeepPartial, type SimParams } from './params';
@@ -852,7 +852,7 @@ export class Sim {
         g.waitingSinceMs = null;
         g.patienceReported = false;
       }
-      this.log('info', 'group.rerouted', `${g.label} : ${name} bloquée, itinéraire modifié (${added >= 0 ? '+' : ''}${Math.round(added)} m).`, why, { type: 'group', id: g.id }, { deltaM: Math.round(added) });
+      this.log('info', 'group.rerouted', `${g.label} : ${name} bloquée, itinéraire modifié (${deltaText(added)}).`, why, { type: 'group', id: g.id }, { deltaM: Math.round(added) });
     } else if (g.phase !== 'waiting') {
       g.phase = 'waiting';
       g.waitingSinceMs = this.timeMs;

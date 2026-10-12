@@ -1,22 +1,54 @@
-import { LocalFrame, pixelsPerMeter, project, type Vec2, type ViewState } from '../geo/mercator';
-import { groupRadius } from '../demo/demoScenario';
-import type { CrowdGroup, EntityRef, ForceUnit, Incident, RenderSnapshot, Vehicle } from '../state/types';
-import { buildCrowdLayout, toneThresholds, type CrowdLayout } from './crowd';
-import { crowdDotCount, hitTest, lodForZoom, type HitTarget, type Lod } from './lod';
+import { LocalFrame, pixelsPerMeter, type Vec2, type ViewState } from '../geo/mercator';
+import type { GameController } from '../game/controller';
+import { groupBox, memberLive, sameRef, type EntityRef } from '../game/selection';
+import type { ForceKind, MoverEntity, UnitEntity, UnitStatus, VehicleEntity, VehicleKind } from '../engine/types';
+import type { GameZone } from '../state/types';
+import { lodForZoom, type Lod } from './lod';
 
 const COLORS = {
   accent: '#22d3ee',
   crowdCalm: '#eef2f7',
   crowdTense: '#ffc857',
   crowdHot: '#ff5a4d',
-  shield: '#1d4ed8',
-  shieldEdge: '#bfdbfe',
-  police: '#7dd3fc',
   blocked: '#ff3b30',
+  partial: '#fb923c',
+  slowed: '#facc15',
   zone: '#38bdf8',
   text: '#f8fafc',
   pill: 'rgba(8,12,20,0.82)',
 };
+
+const STATUS_RING: Record<UnitStatus, { color: string; dash: number[] | null }> = {
+  idle: { color: '#f8fafc', dash: null },
+  moving: { color: '#4ade80', dash: [6, 4] },
+  waiting: { color: '#fbbf24', dash: [3, 4] },
+  engaged: { color: '#f87171', dash: [6, 4] },
+  in_difficulty: { color: '#f97316', dash: [2, 3] },
+  unavailable: { color: '#94a3b8', dash: [2, 5] },
+};
+
+const FORCE_STYLE: Record<ForceKind, { code: string; fill: string; edge: string }> = {
+  crs: { code: 'CRS', fill: '#1d4ed8', edge: '#bfdbfe' },
+  police_nationale: { code: 'POL', fill: '#38bdf8', edge: '#e0f2fe' },
+  gendarmerie_mobile: { code: 'GM', fill: '#312e81', edge: '#c7d2fe' },
+  unite_speciale: { code: 'US', fill: '#374151', edge: '#d1d5db' },
+};
+
+/** Dimensions (longueur, largeur en m), couleur de caisse, bande, gyrophare. */
+const VEHICLE_STYLE: Record<VehicleKind, { len: number; wid: number; body: string; stripe: string; lights: 'blue' | 'emergency' | 'none'; label: string }> = {
+  fourgon_police: { len: 6.2, wid: 2.3, body: '#1e3a8a', stripe: '#93c5fd', lights: 'blue', label: 'Fourgon de police' },
+  fourgon_crs: { len: 6.8, wid: 2.4, body: '#1e40af', stripe: '#bfdbfe', lights: 'blue', label: 'Transport CRS' },
+  voiture_police: { len: 4.7, wid: 1.9, body: '#f1f5f9', stripe: '#1d4ed8', lights: 'blue', label: 'Véhicule de police' },
+  ambulance: { len: 6.2, wid: 2.4, body: '#ffffff', stripe: '#ef4444', lights: 'emergency', label: 'Ambulance' },
+  camion_pompiers: { len: 9.6, wid: 2.7, body: '#dc2626', stripe: '#fde68a', lights: 'emergency', label: 'Sapeurs-pompiers' },
+  vehicule_secours_leger: { len: 4.8, wid: 1.9, body: '#fde047', stripe: '#dc2626', lights: 'emergency', label: 'Secours léger' },
+  vehicule_gendarmerie: { len: 4.8, wid: 1.9, body: '#1e293b', stripe: '#60a5fa', lights: 'blue', label: 'Véhicule de gendarmerie' },
+  voiture_banalisee: { len: 4.5, wid: 1.8, body: '#64748b', stripe: '#cbd5e1', lights: 'none', label: 'Véhicule banalisé' },
+  moto_police: { len: 2.2, wid: 0.9, body: '#0f172a', stripe: '#38bdf8', lights: 'blue', label: 'Moto de police' },
+  camion_a_eau: { len: 9, wid: 3, body: '#334155', stripe: '#38bdf8', lights: 'blue', label: 'Lanceur d’eau' },
+};
+export const VEHICLE_LABEL: Record<VehicleKind, string> = Object.fromEntries(Object.entries(VEHICLE_STYLE).map(([k, v]) => [k, v.label])) as Record<VehicleKind, string>;
+export const FORCE_CODE: Record<ForceKind, string> = Object.fromEntries(Object.entries(FORCE_STYLE).map(([k, v]) => [k, v.code])) as Record<ForceKind, string>;
 
 export interface FrameStats {
   frames: number;
@@ -25,40 +57,56 @@ export interface FrameStats {
   maxMs: number;
   /** Nombre de points de foule tracés lors de la dernière image. */
   dots: number;
-  /** Cadence réellement observée (intervalle entre deux images navigateur), en images/s. */
   fps: number;
-  /** Intervalle p95 entre deux images, en ms. */
   frameIntervalP95Ms: number;
 }
 
+export interface ScreenTarget {
+  ref: EntityRef;
+  x: number;
+  y: number;
+}
+
+/** Budget de points de foule tracés par image (échantillonnage uniforme au-delà). */
+export const DOT_BUDGET = 9000;
+
+const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
+
 /**
- * Couche de rendu du jeu (Canvas 2D) superposée à la carte. Elle lit la caméra de l'adaptateur de
- * carte à chaque image et projette elle-même les coordonnées : les pions restent donc alignés
- * pendant le déplacement, le zoom et les animations de caméra.
+ * Couche de rendu du jeu (Canvas 2D) superposée à la carte. Elle lit l'état du moteur (interpolé entre deux ticks)
+ * et la caméra de l'adaptateur de carte à chaque image : les pions restent alignés pendant le déplacement et le zoom.
+ * La projection est affine, ancrée au centre de la vue (erreur < 1 px sur la zone de jeu aux zooms utiles).
  */
 export class GameRenderer {
   private readonly ctx: CanvasRenderingContext2D;
-  private snapshot: RenderSnapshot | null = null;
-  private targets: HitTarget[] = [];
-  private layouts = new Map<string, CrowdLayout>();
+  private ctrl: GameController | null = null;
+  private frame: LocalFrame | null = null;
+  private zone: GameZone = { halfWidth: 600, halfHeight: 450 };
   private raf = 0;
   private running = false;
-  private frame: LocalFrame | null = null;
-  private frameOriginKey = '';
   private durations: number[] = [];
   private frameCount = 0;
   private lastDots = 0;
   private intervals: number[] = [];
   private lastTick = 0;
-  /** Diagnostic de performance : couches à ne pas dessiner (zone, blocked, glow, crowd, vehicles, units, incidents, selection). */
+  private targets: ScreenTarget[] = [];
+  /** Diagnostic : couches à ne pas dessiner (zone, streets, crowd, vehicles, units, routes). */
   readonly skip = new Set<string>();
-  private hoverId: string | null = null;
+  hover: EntityRef | null = null;
+  /** Mode « Aller ici » actif : curseur de ciblage dessiné par l'interface. */
   readonly reducedMotion: boolean;
-  /** Amplitude globale des animations (0 si « réduire les animations » est demandé). */
   motion = 1;
   private cssW = 0;
   private cssH = 0;
   private dpr = 1;
+  // projection affine de l'image courante
+  private cx = 0;
+  private cy = 0;
+  private mx = 0;
+  private my = 0;
+  private ppm = 1;
+  /** Fonction appelée avant chaque dessin (avance la simulation) avec le temps réel écoulé en ms. */
+  beforeDraw: ((dtMs: number) => void) | null = null;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -71,13 +119,13 @@ export class GameRenderer {
     if (this.reducedMotion) this.motion = 0;
   }
 
-  setSnapshot(s: RenderSnapshot | null): void {
-    this.snapshot = s;
-    if (!s) this.targets = [];
+  setController(c: GameController | null, origin?: { lng: number; lat: number }): void {
+    this.ctrl = c;
+    this.frame = origin ? new LocalFrame(origin) : null;
   }
 
-  setHover(id: string | null): void {
-    this.hoverId = id;
+  setZone(z: GameZone): void {
+    this.zone = z;
   }
 
   start(): void {
@@ -85,11 +133,13 @@ export class GameRenderer {
     this.running = true;
     const loop = (now: number) => {
       if (!this.running) return;
+      const dt = this.lastTick ? now - this.lastTick : 16;
       if (this.lastTick) {
-        this.intervals.push(now - this.lastTick);
+        this.intervals.push(dt);
         if (this.intervals.length > 240) this.intervals.shift();
       }
       this.lastTick = now;
+      this.beforeDraw?.(dt);
       this.draw(now);
       this.raf = requestAnimationFrame(loop);
     };
@@ -101,12 +151,7 @@ export class GameRenderer {
     cancelAnimationFrame(this.raf);
   }
 
-  hit(p: Vec2): EntityRef | null {
-    return hitTest(this.targets, p);
-  }
-
-  /** Cibles interactives de la dernière image (position écran de chaque pion). */
-  getTargets(): HitTarget[] {
+  getTargets(): ScreenTarget[] {
     return this.targets.map((t) => ({ ...t }));
   }
 
@@ -132,10 +177,34 @@ export class GameRenderer {
     this.frameCount = 0;
   }
 
-  /** Projette un point du repère local en pixels écran (exact, via Mercator). */
-  toScreen(m: Vec2): Vec2 | null {
-    if (!this.snapshot || !this.frame) return null;
-    return project(this.getView(), this.frame.toLngLat(m));
+  // ------------------------------------------------------------------ conversions écran ↔ monde
+
+  /** Point du repère local (m) → pixels écran (projection de l'image courante). */
+  toScreen(m: Vec2): Vec2 {
+    return { x: this.cx + (m.x - this.mx) * this.ppm, y: this.cy - (m.y - this.my) * this.ppm };
+  }
+
+  /** Pixels écran → repère local (m), d'après la vue courante. */
+  toWorld(p: Vec2): Vec2 | null {
+    const view = this.getView();
+    if (!this.frame) return null;
+    this.setProjection(view);
+    return { x: this.mx + (p.x - this.cx) / this.ppm, y: this.my - (p.y - this.cy) / this.ppm };
+  }
+
+  /** Mètres par pixel dans la vue courante. */
+  metersPerPixel(): number {
+    return 1 / this.ppm;
+  }
+
+  private setProjection(view: ViewState): void {
+    const frame = this.frame as LocalFrame;
+    const m = frame.toMeters({ lng: view.lng, lat: view.lat });
+    this.mx = m.x;
+    this.my = m.y;
+    this.cx = view.width / 2;
+    this.cy = view.height / 2;
+    this.ppm = pixelsPerMeter(view.lat, view.zoom);
   }
 
   // ------------------------------------------------------------------ dessin
@@ -147,16 +216,11 @@ export class GameRenderer {
     const { ctx } = this;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.clearRect(0, 0, this.cssW, this.cssH);
-    const snap = this.snapshot;
     this.targets = [];
     this.lastDots = 0;
-    if (snap && this.cssW > 1) {
-      const key = `${snap.origin.lng},${snap.origin.lat}`;
-      if (key !== this.frameOriginKey || !this.frame) {
-        this.frame = new LocalFrame(snap.origin);
-        this.frameOriginKey = key;
-      }
-      this.drawScene(snap, view, nowMs / 1000);
+    if (this.ctrl && this.frame && this.cssW > 1) {
+      this.setProjection(view);
+      this.drawScene(this.ctrl, view, nowMs / 1000);
     }
     this.frameCount++;
     this.durations.push(performance.now() - t0);
@@ -178,42 +242,34 @@ export class GameRenderer {
     }
   }
 
-  private drawScene(snap: RenderSnapshot, view: ViewState, t: number): void {
-    const frame = this.frame as LocalFrame;
-    const ppm = pixelsPerMeter(view.lat, view.zoom);
+  private drawScene(c: GameController, view: ViewState, t: number): void {
     const lod = lodForZoom(view.zoom);
-    const px = (m: Vec2): Vec2 => project(view, frame.toLngLat(m));
-
     const on = (k: string) => !this.skip.has(k);
-    if (on('zone')) this.drawZone(snap, px, t);
-    if (on('blocked')) this.drawBlocked(snap, px, ppm, t, lod);
-    if (on('glow')) this.drawIncidentGlow(snap, px, ppm, t);
-    if (on('crowd')) for (const g of snap.groups) this.drawCrowd(g, snap, px, ppm, t, lod, view.zoom);
-    if (on('vehicles')) for (const v of snap.vehicles) this.drawVehicle(v, px, ppm, t, lod, snap);
-    if (on('units')) for (const u of snap.units) this.drawUnit(u, px, ppm, t, lod, snap);
-    if (on('incidents')) for (const i of snap.incidents) this.drawIncident(i, px, ppm, t, snap, lod);
-    if (on('selection')) this.drawSelection(snap, px, ppm, t);
+    const alpha = c.alpha;
+    if (on('zone')) this.drawZone(t);
+    if (on('streets')) this.drawStreets(c, t, lod);
+    if (on('routes')) this.drawRoutes(c, alpha, t);
+    if (on('crowd')) this.drawCrowds(c, alpha, lod, t);
+    if (on('vehicles')) for (const v of c.sim.vehicles) this.drawVehicle(c, v, alpha, t, lod);
+    if (on('units')) for (const u of c.sim.units) this.drawUnit(c, u, alpha, t, lod);
   }
 
   // -- zone, rues ---------------------------------------------------------
 
-  private drawZone(snap: RenderSnapshot, px: (m: Vec2) => Vec2, t: number): void {
+  private drawZone(t: number): void {
     const { ctx } = this;
-    const { halfWidth: w, halfHeight: h } = snap.zone;
-    const c = [px({ x: -w, y: h }), px({ x: w, y: h }), px({ x: w, y: -h }), px({ x: -w, y: -h })] as [Vec2, Vec2, Vec2, Vec2];
+    const { halfWidth: w, halfHeight: h } = this.zone;
+    const a = this.toScreen({ x: -w, y: h });
+    const b = this.toScreen({ x: w, y: -h });
     ctx.save();
     ctx.beginPath();
     ctx.rect(0, 0, this.cssW, this.cssH);
-    ctx.moveTo(c[0].x, c[0].y);
-    for (let i = 1; i < 4; i++) ctx.lineTo(c[i]!.x, c[i]!.y);
-    ctx.closePath();
+    ctx.rect(a.x, a.y, b.x - a.x, b.y - a.y);
     ctx.fillStyle = 'rgba(4,10,20,0.42)';
     ctx.fill('evenodd');
     ctx.beginPath();
-    ctx.moveTo(c[0].x, c[0].y);
-    for (let i = 1; i < 4; i++) ctx.lineTo(c[i]!.x, c[i]!.y);
-    ctx.closePath();
-    ctx.strokeStyle = 'rgba(56,189,248,0.22)'; // halo bon marché (le flou de canvas est trop coûteux en rendu logiciel)
+    ctx.rect(a.x, a.y, b.x - a.x, b.y - a.y);
+    ctx.strokeStyle = 'rgba(56,189,248,0.22)';
     ctx.lineWidth = 8;
     ctx.stroke();
     ctx.setLineDash([14, 8]);
@@ -222,35 +278,56 @@ export class GameRenderer {
     ctx.lineWidth = 2.4;
     ctx.stroke();
     ctx.restore();
-    // Étiquette de zone
-    this.pill('ZONE DE JEU', c[0].x + 10, c[0].y + 10, { size: 11, bg: 'rgba(8,47,73,0.85)', border: COLORS.zone, align: 'left' });
+    this.pill('ZONE DE JEU', a.x + 10, a.y + 10, { size: 11, bg: 'rgba(8,47,73,0.85)', border: COLORS.zone, align: 'left' });
   }
 
-  private drawBlocked(snap: RenderSnapshot, px: (m: Vec2) => Vec2, ppm: number, t: number, lod: Lod): void {
-    if (snap.blockedSegmentIds.size === 0) return;
+  /** Surcouche des états de rue : ralentie, partiellement obstruée, bloquée, fermée par le scénario. */
+  private drawStreets(c: GameController, t: number, lod: Lod): void {
     const { ctx } = this;
+    const g = c.sim.graph;
+    const st = c.sim.state;
+    const ppm = this.ppm;
     ctx.save();
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-    const lw = Math.max(3, Math.min(9, 5 * ppm * 0.9));
-    for (const seg of snap.segments) {
-      if (!snap.blockedSegmentIds.has(seg.id) || seg.points.length < 2) continue;
-      const pts = seg.points.map(px);
+    for (let e = 0; e < g.edgeCount; e++) {
+      const closed = st.scenarioBlock[e] === 1;
+      const s = Math.max(st.footState[e] as number, st.vehState[e] as number);
+      if (!closed && s === 0) continue;
+      const a = g.shapeStart[e] as number;
+      const b = g.shapeStart[e + 1] as number;
+      const x0 = g.shape[2 * a] as number;
+      const y0 = g.shape[2 * a + 1] as number;
+      const p0 = this.toScreen({ x: x0, y: y0 });
+      if (p0.x < -400 || p0.y < -400 || p0.x > this.cssW + 400 || p0.y > this.cssH + 400) continue;
+      const lw = Math.max(3, Math.min(9, (g.edgeWidth[e] as number) * ppm * 0.45));
       ctx.beginPath();
-      pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
-      ctx.strokeStyle = 'rgba(10,0,0,0.65)';
-      ctx.setLineDash([]);
-      ctx.lineWidth = lw + 2.5;
-      ctx.stroke();
-      ctx.strokeStyle = COLORS.blocked;
-      ctx.setLineDash([lw * 2.2, lw * 1.4]);
-      ctx.lineDashOffset = -t * 14 * this.motion;
-      ctx.lineWidth = lw;
-      ctx.stroke();
-      if (lod.labels) {
-        const a = pts[0] as Vec2;
-        const b = pts[pts.length - 1] as Vec2;
-        this.barrierIcon((a.x + b.x) / 2, (a.y + b.y) / 2, Math.max(6, Math.min(11, ppm * 3)));
+      for (let k = a; k < b; k++) {
+        const p = this.toScreen({ x: g.shape[2 * k] as number, y: g.shape[2 * k + 1] as number });
+        if (k === a) ctx.moveTo(p.x, p.y);
+        else ctx.lineTo(p.x, p.y);
+      }
+      if (closed || s === 3) {
+        ctx.setLineDash([]);
+        ctx.strokeStyle = 'rgba(10,0,0,0.65)';
+        ctx.lineWidth = lw + 2.5;
+        ctx.stroke();
+        ctx.setLineDash([lw * 2.2, lw * 1.4]);
+        ctx.lineDashOffset = -t * 14 * this.motion;
+        ctx.strokeStyle = COLORS.blocked;
+        ctx.lineWidth = lw;
+        ctx.stroke();
+      } else {
+        ctx.setLineDash(s === 2 ? [lw * 3, lw * 1.2] : []);
+        ctx.strokeStyle = s === 2 ? COLORS.partial : COLORS.slowed;
+        ctx.globalAlpha = 0.85;
+        ctx.lineWidth = s === 2 ? lw : Math.max(2.5, lw * 0.7);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+      if (closed && lod.labels) {
+        const mid = this.toScreen({ x: ((g.shape[2 * a] as number) + (g.shape[2 * (b - 1)] as number)) / 2, y: ((g.shape[2 * a + 1] as number) + (g.shape[2 * (b - 1) + 1] as number)) / 2 });
+        this.barrierIcon(mid.x, mid.y, Math.max(6, Math.min(11, ppm * 3)));
       }
     }
     ctx.restore();
@@ -276,395 +353,323 @@ export class GameRenderer {
     ctx.restore();
   }
 
-  // -- foule --------------------------------------------------------------
+  // -- itinéraires et destinations ----------------------------------------
 
-  private layoutFor(g: CrowdGroup, count: number): CrowdLayout {
-    const key = `${g.id}:${count}:${g.seed}`;
-    let l = this.layouts.get(key);
-    if (!l) {
-      if (this.layouts.size > 64) this.layouts.clear();
-      l = buildCrowdLayout(count, g.seed);
-      this.layouts.set(key, l);
+  private drawRoutes(c: GameController, alpha: number, t: number): void {
+    const { ctx } = this;
+    for (const r of c.selection) {
+      let route = null as MoverEntity['route'];
+      let s0 = 0;
+      let dest: Vec2 | null = null;
+      let color = COLORS.accent;
+      if (r.type === 'group') {
+        const g = c.sim.group(r.id);
+        if (!g?.route) continue;
+        route = g.route;
+        s0 = Math.max(0, g.sCentre);
+        const d = g.plan.destination;
+        dest = d ? d.pos : null;
+        color = '#e2e8f0';
+      } else {
+        const e = c.sim.entity(r.id);
+        if (!e?.route) continue;
+        route = e.route;
+        s0 = e.routeS;
+        dest = e.order ? e.order.target : null;
+        color = e.status === 'waiting' ? '#fbbf24' : '#4ade80';
+      }
+      if (!route) continue;
+      void alpha;
+      const pts = route.pts;
+      const cum = route.cum;
+      ctx.save();
+      ctx.beginPath();
+      let started = false;
+      for (let i = 0; i < cum.length; i++) {
+        if ((cum[i] as number) < s0 - 1) continue;
+        const p = this.toScreen({ x: pts[2 * i] as number, y: pts[2 * i + 1] as number });
+        if (!started) {
+          const cur = this.toScreen(r.type === 'group' ? (c.positionOf(r) ?? { x: pts[2 * i] as number, y: pts[2 * i + 1] as number }) : { x: (c.sim.entity(r.id) as MoverEntity).x, y: (c.sim.entity(r.id) as MoverEntity).y });
+          ctx.moveTo(cur.x, cur.y);
+          started = true;
+        }
+        ctx.lineTo(p.x, p.y);
+      }
+      ctx.setLineDash([8, 6]);
+      ctx.lineDashOffset = -t * 20 * this.motion;
+      ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+      ctx.lineWidth = 4.5;
+      ctx.stroke();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2.4;
+      ctx.stroke();
+      ctx.restore();
+      if (dest) this.destinationMarker(this.toScreen(dest), color);
     }
-    return l;
   }
 
-  private drawCrowd(g: CrowdGroup, snap: RenderSnapshot, px: (m: Vec2) => Vec2, ppm: number, t: number, lod: Lod, zoom: number): void {
+  private destinationMarker(p: Vec2, color: string): void {
     const { ctx } = this;
-    const c = px(g.pos);
-    const R = groupRadius(g);
-    const rpx = R * ppm;
-    if (c.x < -rpx - 60 || c.y < -rpx - 60 || c.x > this.cssW + rpx + 60 || c.y > this.cssH + rpx + 60) return;
-    const selected = snap.selection?.type === 'group' && snap.selection.id === g.id;
-    this.targets.push({ ref: { type: 'group', id: g.id }, x: c.x, y: c.y, r: Math.max(rpx, 14), z: 0 });
-
-    const tone = g.tension > 65 ? COLORS.crowdHot : g.tension > 35 ? COLORS.crowdTense : COLORS.crowdCalm;
-    if (lod.aggregateCrowd) {
-      const r = Math.max(13, Math.min(34, 4 + Math.sqrt(g.size) * 1.9));
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
-      ctx.fillStyle = tone;
-      ctx.globalAlpha = 0.9;
-      ctx.fill();
-      ctx.globalAlpha = 1;
-      ctx.lineWidth = selected ? 3 : 1.5;
-      ctx.strokeStyle = selected ? COLORS.accent : 'rgba(0,0,0,0.6)';
-      ctx.stroke();
-      ctx.fillStyle = '#0b1220';
-      ctx.font = '700 12px system-ui, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(String(g.size), c.x, c.y + 0.5);
-      ctx.restore();
-      return;
-    }
-
-    const count = crowdDotCount(g, lod);
-    const layout = this.layoutFor(g, count);
-    const th = toneThresholds(g.tension);
-    const agit = (1 + g.tension / 55) * this.motion;
-    const dotR = Math.max(1.3, Math.min(4.8, 0.85 * ppm));
-    const driftX = Math.sin(t * 0.21 + g.seed) * 1.6 * this.motion;
-    const driftY = Math.cos(t * 0.17 + g.seed * 1.7) * 1.2 * this.motion;
-    const breathe = 1 + 0.035 * Math.sin(t * 0.6 + g.seed) * this.motion;
-    const amp = 0.55 * ppm * agit;
-
-    // Ombre portée (haut zoom uniquement), puis trois passes de teinte.
-    const buckets: Array<{ color: string; pts: number[] }> = [
-      { color: COLORS.crowdCalm, pts: [] },
-      { color: COLORS.crowdTense, pts: [] },
-      { color: COLORS.crowdHot, pts: [] },
-    ];
-    const cx = c.x + driftX * ppm;
-    const cy = c.y - driftY * ppm;
-    for (let i = 0; i < layout.count; i++) {
-      const ph = layout.phase[i] as number;
-      const sp = layout.speed[i] as number;
-      const x = cx + (layout.rx[i] as number) * rpx * breathe + Math.sin(t * sp + ph) * amp;
-      const y = cy + (layout.ry[i] as number) * rpx * breathe + Math.cos(t * sp * 0.83 + ph * 1.3) * amp;
-      const tn = layout.tone[i] as number;
-      const b = tn < th.red ? 2 : tn < th.red + th.amber ? 1 : 0;
-      (buckets[b] as { pts: number[] }).pts.push(x, y);
-    }
     ctx.save();
-    if (zoom >= 16.6) {
-      ctx.fillStyle = 'rgba(0,0,0,0.35)';
-      ctx.beginPath();
-      for (const b of buckets) for (let k = 0; k < b.pts.length; k += 2) {
-        const x = b.pts[k] as number + 0.9;
-        const y = b.pts[k + 1] as number + 1.1;
-        ctx.moveTo(x + dotR + 0.6, y);
-        ctx.arc(x, y, dotR + 0.6, 0, Math.PI * 2);
-      }
-      ctx.fill();
-    }
-    for (const b of buckets) {
-      if (!b.pts.length) continue;
-      ctx.fillStyle = b.color;
-      ctx.beginPath();
-      for (let k = 0; k < b.pts.length; k += 2) {
-        const x = b.pts[k] as number;
-        const y = b.pts[k + 1] as number;
-        ctx.moveTo(x + dotR, y);
-        ctx.arc(x, y, dotR, 0, Math.PI * 2);
-      }
-      ctx.fill();
-    }
+    ctx.translate(p.x, p.y);
+    ctx.beginPath();
+    ctx.arc(0, 0, 9, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(8,12,20,0.8)';
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = color;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(-5, 0);
+    ctx.lineTo(5, 0);
+    ctx.moveTo(0, -5);
+    ctx.lineTo(0, 5);
+    ctx.stroke();
     ctx.restore();
-    this.lastDots += layout.count;
+  }
 
-    if (selected || this.hoverId === g.id) {
+  // -- foule --------------------------------------------------------------
+
+  private drawCrowds(c: GameController, alpha: number, lod: Lod, t: number): void {
+    const { ctx } = this;
+    const groups = c.sim.groups.filter((g) => g.phase !== 'dispersed');
+    let total = 0;
+    for (const g of groups) total += g.members.n - g.members.activeStart;
+    if (total === 0) return;
+    const dotR = Math.max(1.2, Math.min(4.2, 0.32 * this.ppm));
+    for (const g of groups) {
+      const m = g.members;
+      const n = m.n - m.activeStart;
+      if (n <= 0) continue;
+      const box = groupBox(g, 0);
+      if (!box) continue;
+      const centre = this.toScreen({ x: (box.minX + box.maxX) / 2, y: (box.minY + box.maxY) / 2 });
+      const rPx = (Math.hypot(box.maxX - box.minX, box.maxY - box.minY) / 2) * this.ppm;
+      const selected = c.selection.some((r) => r.type === 'group' && r.id === g.id);
+      const hovered = this.hover?.type === 'group' && this.hover.id === g.id;
+      this.targets.push({ ref: { type: 'group', id: g.id }, x: centre.x, y: centre.y });
+      const tone = g.tension > 65 ? COLORS.crowdHot : g.tension > 35 ? COLORS.crowdTense : COLORS.crowdCalm;
+      // hors écran (avec marge) : rien à tracer
+      const sx0 = this.toScreen({ x: box.minX, y: box.maxY });
+      const sx1 = this.toScreen({ x: box.maxX, y: box.minY });
+      if (sx1.x < -40 || sx0.x > this.cssW + 40 || sx1.y < -40 || sx0.y > this.cssH + 40) continue;
+
+      if (lod.aggregateCrowd) {
+        const r = Math.max(13, Math.min(34, 4 + Math.sqrt(n) * 1.1));
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(centre.x, centre.y, r, 0, Math.PI * 2);
+        ctx.fillStyle = tone;
+        ctx.globalAlpha = 0.92;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.lineWidth = selected ? 3 : 1.5;
+        ctx.strokeStyle = selected ? COLORS.accent : 'rgba(0,0,0,0.6)';
+        ctx.stroke();
+        ctx.fillStyle = '#0b1220';
+        ctx.font = '700 12px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(String(n), centre.x, centre.y + 0.5);
+        ctx.restore();
+        continue;
+      }
+
+      // individus : échantillonnage régulier selon le budget global
+      const stride = Math.max(1, Math.ceil(total / DOT_BUDGET));
       ctx.save();
+      ctx.fillStyle = tone;
       ctx.beginPath();
-      ctx.ellipse(c.x, c.y, rpx * 1.1, rpx * 0.95, 0, 0, Math.PI * 2);
-      ctx.setLineDash([6, 5]);
-      ctx.strokeStyle = selected ? COLORS.accent : 'rgba(255,255,255,0.55)';
-      ctx.lineWidth = 1.6;
-      ctx.stroke();
+      const W = this.cssW + 8;
+      const H = this.cssH + 8;
+      let drawn = 0;
+      const first = m.activeStart + ((g.seed >>> 0) % stride);
+      const bl = g.blocks;
+      for (let i = first; i < m.n; i += stride) {
+        if (bl ? (bl.level[Math.floor(i / bl.size)] as number) === 0 : g.level === 0) continue;
+        const x = (m.px[i] as number) + ((m.x[i] as number) - (m.px[i] as number)) * alpha;
+        const y = (m.py[i] as number) + ((m.y[i] as number) - (m.py[i] as number)) * alpha;
+        const sx = this.cx + (x - this.mx) * this.ppm;
+        const sy = this.cy - (y - this.my) * this.ppm;
+        if (sx < -8 || sy < -8 || sx > W || sy > H) continue;
+        ctx.moveTo(sx + dotR, sy);
+        ctx.arc(sx, sy, dotR, 0, Math.PI * 2);
+        drawn++;
+      }
+      ctx.fill();
       ctx.restore();
+      this.lastDots += drawn;
+
+      if (selected || hovered) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.ellipse(centre.x, centre.y, rPx * 1.05 + 10, rPx * 1.05 + 10, 0, 0, Math.PI * 2);
+        ctx.setLineDash([6, 5]);
+        ctx.lineDashOffset = -t * 12 * this.motion;
+        ctx.strokeStyle = selected ? COLORS.accent : 'rgba(255,255,255,0.55)';
+        ctx.lineWidth = 1.6;
+        ctx.stroke();
+        ctx.restore();
+      }
+      if (lod.labels) this.pill(`${g.label} · ${n}`, centre.x, centre.y - Math.min(rPx, 200) - 14, { size: 11, bg: COLORS.pill, border: tone });
     }
-    if (lod.labels) this.pill(`${g.label} · ${g.size}`, c.x, c.y - rpx - 8, { size: 11, bg: COLORS.pill, border: tone });
+    // individu sélectionné
+    for (const r of c.selection) {
+      if (r.type !== 'group' || r.member === undefined) continue;
+      const g = c.sim.group(r.id);
+      if (!g || r.member < g.members.activeStart || !memberLive(g, r.member)) continue;
+      const p = this.toScreen({ x: g.members.x[r.member] as number, y: g.members.y[r.member] as number });
+      this.ring(p, 7, COLORS.accent, t);
+    }
   }
 
   // -- forces -------------------------------------------------------------
 
-  private drawUnit(u: ForceUnit, px: (m: Vec2) => Vec2, ppm: number, t: number, lod: Lod, snap: RenderSnapshot): void {
-    const c = px(u.pos);
-    if (c.x < -80 || c.y < -80 || c.x > this.cssW + 80 || c.y > this.cssH + 80) return;
-    const selected = snap.selection?.type === 'unit' && snap.selection.id === u.id;
-    const { ctx } = this;
-    const crs = u.kind === 'crs';
-    const sway = this.motion * 0.25 * ppm;
-    ctx.save();
-    ctx.translate(c.x + Math.sin(t * 0.9 + u.headcount) * sway, c.y + Math.cos(t * 0.7 + u.headcount) * sway * 0.6);
-    // Le cap est en repère monde (y vers le nord) ; l'écran a y vers le bas.
-    ctx.rotate(-u.heading);
+  private interp(e: MoverEntity, alpha: number): { x: number; y: number; h: number } {
+    return {
+      x: e.px + (e.x - e.px) * alpha,
+      y: e.py + (e.y - e.py) * alpha,
+      h: e.prevHeading + wrap(e.heading - e.prevHeading) * alpha,
+    };
+  }
 
+  private drawUnit(c: GameController, u: UnitEntity, alpha: number, t: number, lod: Lod): void {
+    const ip = this.interp(u, alpha);
+    const p = this.toScreen(ip);
+    if (p.x < -80 || p.y < -80 || p.x > this.cssW + 80 || p.y > this.cssH + 80) return;
+    const ref: EntityRef = { type: 'unit', id: u.id };
+    const selected = c.isSelected(ref);
+    const hovered = sameRef(this.hover, ref);
+    this.targets.push({ ref, x: p.x, y: p.y });
+    const style = FORCE_STYLE[u.force];
+    const { ctx } = this;
+    const heavy = u.force === 'crs' || u.force === 'gendarmerie_mobile';
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate(-ip.h);
     let hitR: number;
     if (lod.shieldFormation) {
-      const n = crs ? Math.max(5, Math.round(u.headcount / 3)) : 3;
-      const size = Math.max(10, Math.min(24, (crs ? 3.4 : 2.6) * ppm));
+      const n = heavy ? Math.max(5, Math.round(u.headcount / 3)) : 3;
+      const size = Math.max(10, Math.min(24, (heavy ? 3.4 : 2.6) * this.ppm));
       const spacing = size * 0.92;
       const span = (n - 1) * spacing;
-      for (let i = 0; i < n; i++) {
-        const off = i * spacing - span / 2;
-        const wob = Math.sin(t * 1.6 + i * 1.3) * 0.35 * this.motion;
-        this.shieldGlyph(ctx, wob + size * 0.15, off, size, crs);
-      }
+      for (let i = 0; i < n; i++) this.shieldGlyph(ctx, size * 0.15, i * spacing - span / 2, size, style);
       hitR = Math.max(span / 2 + size, 16);
     } else {
-      const size = crs ? 26 : 20;
-      this.shieldGlyph(ctx, 0, 0, size, crs);
+      const size = heavy ? 26 : 20;
+      this.shieldGlyph(ctx, 0, 0, size, style);
       hitR = size;
     }
     ctx.restore();
-    this.targets.push({ ref: { type: 'unit', id: u.id }, x: c.x, y: c.y, r: hitR, z: 2 });
+    // anneau d'état
+    const ring = STATUS_RING[u.status];
+    this.statusRing(p, hitR + 3, ring.color, ring.dash, t, u.status === 'moving' ? ip.h : null);
+    if (selected) this.ring(p, hitR + 8, COLORS.accent, t);
+    else if (hovered) this.ring(p, hitR + 6, 'rgba(255,255,255,0.6)');
+    this.pill(`${style.code} ${u.num}`, p.x, p.y - hitR - 11, { size: 11, bg: 'rgba(8,18,50,0.92)', border: selected ? COLORS.accent : style.edge, bold: true });
+    if (lod.labels && (selected || hovered)) this.pill(`${u.headcount} agents · ${(u.speedMps * 3.6).toFixed(1)} km/h`, p.x, p.y + hitR + 13, { size: 10, bg: COLORS.pill, border: 'transparent' });
+  }
 
-    // Identifiant fictif au-dessus du pion (toujours horizontal).
-    const label = crs ? `CRS ${u.num}` : `POL ${u.num}`;
-    this.pill(label, c.x, c.y - hitR - 9, {
-      size: 11,
-      bg: crs ? 'rgba(15,32,92,0.92)' : 'rgba(12,45,70,0.92)',
-      border: selected ? COLORS.accent : crs ? '#60a5fa' : '#7dd3fc',
-      bold: true,
-    });
-    if (lod.labels && selected) this.pill(`${u.headcount} agents`, c.x, c.y + hitR + 11, { size: 10, bg: COLORS.pill, border: 'transparent' });
-    if (this.hoverId === u.id && !selected) this.ring(c, hitR + 4, 'rgba(255,255,255,0.6)');
+  private statusRing(p: Vec2, r: number, color: string, dash: number[] | null, t: number, heading: number | null): void {
+    const { ctx } = this;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+    ctx.setLineDash(dash ?? []);
+    ctx.lineDashOffset = -t * 10 * this.motion;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    if (heading !== null) {
+      ctx.translate(p.x, p.y);
+      ctx.rotate(-heading);
+      ctx.setLineDash([]);
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(r + 7, 0);
+      ctx.lineTo(r - 1, -5);
+      ctx.lineTo(r - 1, 5);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
   }
 
   /** Bouclier de gameplay (pictogramme), dessiné vers +x (le « devant » de l'unité). */
-  private shieldGlyph(ctx: CanvasRenderingContext2D, x: number, y: number, size: number, crs: boolean): void {
+  private shieldGlyph(ctx: CanvasRenderingContext2D, x: number, y: number, size: number, style: { fill: string; edge: string }): void {
     const w = size * 0.85;
     const h = size;
     ctx.save();
     ctx.translate(x, y);
-    // agent derrière le bouclier
-    ctx.fillStyle = crs ? '#0f172a' : '#1e293b';
+    ctx.fillStyle = '#0f172a';
     ctx.beginPath();
     ctx.arc(-w * 0.12, 0, w * 0.3, 0, Math.PI * 2);
     ctx.fill();
-    // bouclier
     ctx.beginPath();
     ctx.moveTo(w * 0.15, -h / 2);
     ctx.quadraticCurveTo(w * 0.75, -h * 0.34, w * 0.75, 0);
     ctx.quadraticCurveTo(w * 0.75, h * 0.34, w * 0.15, h / 2);
     ctx.quadraticCurveTo(-w * 0.1, 0, w * 0.15, -h / 2);
     ctx.closePath();
-    ctx.fillStyle = crs ? COLORS.shield : '#38bdf8';
+    ctx.fillStyle = style.fill;
     ctx.fill();
     ctx.lineWidth = Math.max(1, size * 0.08);
-    ctx.strokeStyle = crs ? COLORS.shieldEdge : '#e0f2fe';
+    ctx.strokeStyle = style.edge;
     ctx.stroke();
-    if (size > 9) {
-      ctx.strokeStyle = 'rgba(255,255,255,0.45)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(w * 0.32, -h * 0.28);
-      ctx.lineTo(w * 0.32, h * 0.28);
-      ctx.stroke();
-    }
     ctx.restore();
   }
 
-  private drawVehicle(v: Vehicle, px: (m: Vec2) => Vec2, ppm: number, t: number, lod: Lod, snap: RenderSnapshot): void {
-    const c = px(v.pos);
-    if (c.x < -80 || c.y < -80 || c.x > this.cssW + 80 || c.y > this.cssH + 80) return;
-    const dims: Record<Vehicle['kind'], [number, number]> = {
-      van: [6.2, 2.4],
-      police_car: [4.7, 1.9],
-      water_cannon: [9, 3],
-      ambulance: [6.2, 2.4],
-      fire_truck: [9.6, 2.7],
-    };
-    const [lm, wm] = dims[v.kind];
-    const len = Math.max(16, lm * ppm);
-    const wid = Math.max(7, wm * ppm);
+  private drawVehicle(c: GameController, v: VehicleEntity, alpha: number, t: number, lod: Lod): void {
+    const ip = this.interp(v, alpha);
+    const p = this.toScreen(ip);
+    if (p.x < -80 || p.y < -80 || p.x > this.cssW + 80 || p.y > this.cssH + 80) return;
+    const st = VEHICLE_STYLE[v.vehicle];
+    const ref: EntityRef = { type: 'vehicle', id: v.id };
+    const selected = c.isSelected(ref);
+    const hovered = sameRef(this.hover, ref);
+    this.targets.push({ ref, x: p.x, y: p.y });
+    const len = Math.max(15, st.len * this.ppm);
+    const wid = Math.max(7, st.wid * this.ppm);
     const { ctx } = this;
-    const selected = snap.selection?.type === 'vehicle' && snap.selection.id === v.id;
     ctx.save();
-    ctx.translate(c.x, c.y);
-    ctx.rotate(-v.heading);
+    ctx.translate(p.x, p.y);
+    ctx.rotate(-ip.h);
     ctx.fillStyle = 'rgba(0,0,0,0.35)';
-    roundRect(ctx, -len / 2 + 1, -wid / 2 + 2, len, wid, Math.min(4, wid * 0.3));
+    this.roundRectPath(-len / 2 + 1, -wid / 2 + 2, len, wid, Math.min(4, wid * 0.3));
     ctx.fill();
-    const body: Record<Vehicle['kind'], string> = {
-      van: '#1e3a8a',
-      police_car: '#f1f5f9',
-      water_cannon: '#1e293b',
-      ambulance: '#ffffff',
-      fire_truck: '#dc2626',
-    };
-    ctx.fillStyle = body[v.kind];
-    roundRect(ctx, -len / 2, -wid / 2, len, wid, Math.min(4, wid * 0.3));
+    ctx.fillStyle = st.body;
+    this.roundRectPath(-len / 2, -wid / 2, len, wid, Math.min(4, wid * 0.3));
     ctx.fill();
     ctx.lineWidth = 1.2;
     ctx.strokeStyle = 'rgba(0,0,0,0.65)';
     ctx.stroke();
-    // bandes / détails
-    ctx.fillStyle = v.kind === 'police_car' ? '#1d4ed8' : v.kind === 'ambulance' ? '#ef4444' : v.kind === 'fire_truck' ? '#fde68a' : '#93c5fd';
+    ctx.fillStyle = st.stripe;
     ctx.fillRect(-len / 2 + 2, -wid * 0.08, len - 4, wid * 0.16);
-    ctx.fillStyle = 'rgba(15,23,42,0.75)'; // pare-brise
+    ctx.fillStyle = 'rgba(15,23,42,0.75)';
     ctx.fillRect(len * 0.22, -wid * 0.36, len * 0.14, wid * 0.72);
-    if (v.kind === 'ambulance' && lod.vehicleDetail) {
-      ctx.fillStyle = '#ef4444';
-      const s = wid * 0.36;
-      ctx.fillRect(-s * 0.2 - len * 0.1, -s, s * 0.4, s * 2);
-      ctx.fillRect(-s - len * 0.1, -s * 0.2, s * 2, s * 0.4);
-    }
-    if (v.kind === 'water_cannon') {
-      ctx.fillStyle = '#38bdf8';
-      ctx.beginPath();
-      ctx.arc(-len * 0.1, 0, wid * 0.22, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    // gyrophares animés
-    const phase = Math.sin(t * 9 + v.callsign.length) > 0;
-    const flash = (x: number, y: number, color: string) => {
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.arc(x, y, Math.max(2, wid * 0.14), 0, Math.PI * 2);
-      ctx.fill();
-    };
-    if (v.kind === 'ambulance' || v.kind === 'fire_truck') {
-      flash(len * 0.3, -wid * 0.3, phase ? '#ff2d2d' : '#3b82f6');
-      flash(len * 0.3, wid * 0.3, phase ? '#3b82f6' : '#ff2d2d');
-    } else {
-      flash(len * 0.25, -wid * 0.28, phase ? '#3b82f6' : 'rgba(59,130,246,0.2)');
-      flash(len * 0.25, wid * 0.28, phase ? 'rgba(59,130,246,0.2)' : '#3b82f6');
+    if (st.lights !== 'none') {
+      const phase = Math.sin(t * 9 + v.callsign.length) > 0 && this.motion > 0;
+      const flash = (x: number, y: number, color: string) => {
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(x, y, Math.max(2, wid * 0.14), 0, Math.PI * 2);
+        ctx.fill();
+      };
+      if (st.lights === 'emergency') {
+        flash(len * 0.3, -wid * 0.3, phase ? '#ff2d2d' : '#3b82f6');
+        flash(len * 0.3, wid * 0.3, phase ? '#3b82f6' : '#ff2d2d');
+      } else {
+        flash(len * 0.25, -wid * 0.28, phase ? '#3b82f6' : 'rgba(59,130,246,0.25)');
+        flash(len * 0.25, wid * 0.28, phase ? 'rgba(59,130,246,0.25)' : '#3b82f6');
+      }
     }
     ctx.restore();
     const hit = Math.max(len, wid) * 0.6 + 4;
-    this.targets.push({ ref: { type: 'vehicle', id: v.id }, x: c.x, y: c.y, r: hit, z: 1 });
-    if (lod.vehicleDetail || selected || this.hoverId === v.id) {
-      this.pill(v.callsign, c.x, c.y + hit + 8, { size: 10, bg: COLORS.pill, border: selected ? COLORS.accent : 'transparent' });
-    }
-    if (selected) this.ring(c, hit + 5, COLORS.accent);
-    else if (this.hoverId === v.id) this.ring(c, hit + 3, 'rgba(255,255,255,0.6)');
-  }
-
-  // -- incidents ----------------------------------------------------------
-
-  private drawIncidentGlow(snap: RenderSnapshot, px: (m: Vec2) => Vec2, ppm: number, t: number): void {
-    const { ctx } = this;
-    for (const i of snap.incidents) {
-      if (i.kind !== 'bin_fire') continue;
-      const c = px(i.pos);
-      const r = Math.max(14, (4 + i.severity * 2.2) * ppm) * (1 + 0.08 * Math.sin(t * 5 + i.severity) * this.motion);
-      const g = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, r);
-      g.addColorStop(0, 'rgba(255,170,40,0.75)');
-      g.addColorStop(0.5, 'rgba(255,90,20,0.35)');
-      g.addColorStop(1, 'rgba(255,60,0,0)');
-      ctx.fillStyle = g;
-      ctx.beginPath();
-      ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-
-  private drawIncident(i: Incident, px: (m: Vec2) => Vec2, ppm: number, t: number, snap: RenderSnapshot, lod: Lod): void {
-    const c = px(i.pos);
-    if (c.x < -60 || c.y < -60 || c.x > this.cssW + 60 || c.y > this.cssH + 60) return;
-    const { ctx } = this;
-    const selected = snap.selection?.type === 'incident' && snap.selection.id === i.id;
-    const r = Math.max(11, Math.min(18, 3.2 * ppm));
-    const pulse = (t * 1.4 + i.severity * 0.3) % 1;
-    const sevColor = i.severity >= 4 ? '#ef4444' : i.severity === 3 ? '#f97316' : '#facc15';
-    ctx.save();
-    if (this.motion) {
-      ctx.beginPath();
-      ctx.arc(c.x, c.y, r + pulse * 16, 0, Math.PI * 2);
-      ctx.strokeStyle = sevColor;
-      ctx.globalAlpha = 1 - pulse;
-      ctx.lineWidth = 2;
-      ctx.stroke();
-      ctx.globalAlpha = 1;
-    }
-    ctx.beginPath();
-    ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(8,12,20,0.88)';
-    ctx.fill();
-    ctx.lineWidth = 2.2;
-    ctx.strokeStyle = sevColor;
-    ctx.stroke();
-    ctx.translate(c.x, c.y);
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    switch (i.kind) {
-      case 'bin_fire': {
-        for (let k = 0; k < 3; k++) {
-          const fl = 1 + 0.25 * Math.sin(t * 8 + k * 2) * this.motion;
-          const ox = (k - 1) * r * 0.32;
-          const h = r * (k === 1 ? 0.95 : 0.65) * fl;
-          ctx.fillStyle = k === 1 ? '#ffb020' : '#ff5a1f';
-          ctx.beginPath();
-          ctx.moveTo(ox, r * 0.5);
-          ctx.quadraticCurveTo(ox - r * 0.34, r * 0.1, ox, r * 0.5 - h);
-          ctx.quadraticCurveTo(ox + r * 0.34, r * 0.1, ox, r * 0.5);
-          ctx.fill();
-        }
-        break;
-      }
-      case 'vandalism': {
-        ctx.strokeStyle = '#a5f3fc';
-        ctx.lineWidth = 1.8;
-        ctx.beginPath();
-        for (let k = 0; k < 6; k++) {
-          const a = (k * Math.PI) / 3 + 0.3;
-          ctx.moveTo(0, 0);
-          ctx.lineTo(Math.cos(a) * r * 0.72, Math.sin(a) * r * 0.72);
-        }
-        ctx.stroke();
-        break;
-      }
-      case 'projectiles': {
-        ctx.fillStyle = '#fca5a5';
-        for (let k = 0; k < 3; k++) {
-          const p = (t * 0.9 + k / 3) % 1;
-          ctx.beginPath();
-          ctx.arc(-r * 0.6 + p * r * 1.2, r * 0.35 - Math.sin(p * Math.PI) * r * 0.8, 1.9, 0, Math.PI * 2);
-          ctx.fill();
-        }
-        break;
-      }
-      case 'casualty': {
-        ctx.fillStyle = '#ef4444';
-        const s = r * 0.52;
-        ctx.fillRect(-s * 0.3, -s, s * 0.6, s * 2);
-        ctx.fillRect(-s, -s * 0.3, s * 2, s * 0.6);
-        break;
-      }
-    }
-    ctx.restore();
-    this.targets.push({ ref: { type: 'incident', id: i.id }, x: c.x, y: c.y, r: r + 4, z: 3 });
-    if (lod.labels || selected || this.hoverId === i.id) {
-      this.pill(i.label, c.x, c.y - r - 12, { size: 10, bg: COLORS.pill, border: sevColor });
-    }
-    if (selected) this.ring(c, r + 8, COLORS.accent);
-  }
-
-  private drawSelection(snap: RenderSnapshot, px: (m: Vec2) => Vec2, ppm: number, t: number): void {
-    const sel = snap.selection;
-    if (!sel) return;
-    const pos = this.entityPos(snap, sel);
-    if (!pos) return;
-    const c = px(pos);
-    const r = (sel.type === 'group' ? 0 : 0) + 28 + Math.sin(t * 3) * 1.5 * this.motion;
-    if (sel.type === 'unit' || sel.type === 'vehicle') this.ring(c, r, COLORS.accent, t);
-    void ppm;
-  }
-
-  private entityPos(snap: RenderSnapshot, ref: EntityRef): Vec2 | null {
-    switch (ref.type) {
-      case 'unit':
-        return snap.units.find((u) => u.id === ref.id)?.pos ?? null;
-      case 'vehicle':
-        return snap.vehicles.find((v) => v.id === ref.id)?.pos ?? null;
-      case 'group':
-        return snap.groups.find((g) => g.id === ref.id)?.pos ?? null;
-      case 'incident':
-        return snap.incidents.find((i) => i.id === ref.id)?.pos ?? null;
-    }
+    const ring = STATUS_RING[v.status];
+    if (v.status !== 'idle') this.statusRing(p, hit + 2, ring.color, ring.dash, t, v.status === 'moving' ? ip.h : null);
+    if (selected) this.ring(p, hit + 7, COLORS.accent, t);
+    else if (hovered) this.ring(p, hit + 5, 'rgba(255,255,255,0.6)');
+    if (lod.vehicleDetail || selected || hovered) this.pill(v.callsign, p.x, p.y + hit + 9, { size: 10, bg: COLORS.pill, border: selected ? COLORS.accent : 'transparent' });
   }
 
   // -- primitives ---------------------------------------------------------
@@ -682,12 +687,7 @@ export class GameRenderer {
     ctx.restore();
   }
 
-  private pill(
-    text: string,
-    x: number,
-    y: number,
-    o: { size: number; bg: string; border: string; bold?: boolean; align?: 'center' | 'left' },
-  ): void {
+  private pill(text: string, x: number, y: number, o: { size: number; bg: string; border: string; bold?: boolean; align?: 'center' | 'left' }): void {
     const { ctx } = this;
     ctx.save();
     ctx.font = `${o.bold ? 700 : 600} ${o.size}px system-ui, -apple-system, "Segoe UI", sans-serif`;
@@ -695,7 +695,7 @@ export class GameRenderer {
     const h = o.size + 7;
     const left = o.align === 'left' ? x : x - w / 2;
     ctx.fillStyle = o.bg;
-    roundRect(ctx, left, y - h / 2, w, h, h / 2);
+    this.roundRectPath(left, y - h / 2, w, h, h / 2);
     ctx.fill();
     if (o.border !== 'transparent') {
       ctx.lineWidth = 1.2;
@@ -708,15 +708,17 @@ export class GameRenderer {
     ctx.fillText(text, left + 5, y + 0.5);
     ctx.restore();
   }
+
+  private roundRectPath(x: number, y: number, w: number, h: number, r: number): void {
+    const { ctx } = this;
+    const rr = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + rr, y);
+    ctx.arcTo(x + w, y, x + w, y + h, rr);
+    ctx.arcTo(x + w, y + h, x, y + h, rr);
+    ctx.arcTo(x, y + h, x, y, rr);
+    ctx.arcTo(x, y, x + w, y, rr);
+    ctx.closePath();
+  }
 }
 
-function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
-  const rr = Math.min(r, w / 2, h / 2);
-  ctx.beginPath();
-  ctx.moveTo(x + rr, y);
-  ctx.arcTo(x + w, y, x + w, y + h, rr);
-  ctx.arcTo(x + w, y + h, x, y + h, rr);
-  ctx.arcTo(x, y + h, x, y, rr);
-  ctx.arcTo(x, y, x + w, y, rr);
-  ctx.closePath();
-}

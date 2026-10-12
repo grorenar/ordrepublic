@@ -1,9 +1,7 @@
 import { Map as MLMap, setWorkerUrl, type StyleSpecification } from 'maplibre-gl';
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import type { Bounds, LngLat, LocalFrame, ViewState } from '../geo/mercator';
-import { segmentsFromFeatures } from '../geo/streets';
-import type { GameZone, StreetSegment } from '../state/types';
+import type { Bounds, LngLat, ViewState } from '../geo/mercator';
 import { MAP_PROVIDERS, MIN_ZOOM, STYLE_LOAD_TIMEOUT_MS, type MapProviderId } from '../config/mapConfig';
 import type { MapAdapter, MapStatus } from './MapAdapter';
 
@@ -207,16 +205,6 @@ export class MapLibreAdapter implements MapAdapter {
 
   setTactical(on: boolean): void {
     this.container.classList.toggle('tactical', on);
-  }
-
-  getStreetSegments(frame: LocalFrame, zone: GameZone): StreetSegment[] {
-    if (!this.loaded) return [];
-    try {
-      const features = this.map.queryRenderedFeatures();
-      return segmentsFromFeatures(features as never, frame, zone);
-    } catch {
-      return [];
-    }
   }
 
   debugProject(p: LngLat): { x: number; y: number } {

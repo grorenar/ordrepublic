@@ -45,12 +45,17 @@ const areaOf = (ring: Float32Array): number => {
   return Math.abs(a) / 2;
 };
 
-export function buildDemoScenario(graph: StreetGraph, opts: { cortegeSize?: number; piquetSize?: number } = {}): DemoScenario {
+export function buildDemoScenario(graph: StreetGraph, opts: { cortegeSize?: number; piquetSize?: number; zone?: { halfWidth: number; halfHeight: number } } = {}): DemoScenario {
   const nav = new NavContext(graph, DEFAULT_NAV_PARAMS, createEdgeState(graph));
   const snapPoint = (p: Vec2): Vec2 => nav.snap(p, 'crowd', 2000)?.point ?? p;
 
   // --- lieux : la plus grande place, et un bâtiment voisin
-  const squares = graph.spaces.filter((s) => s.kind === 'square' || s.kind === 'pedestrian_area').sort((a, b) => areaOf(b.ring) - areaOf(a.ring));
+  const zoneBox = opts.zone;
+  const inZoneCore = (p: Vec2) => !zoneBox || (Math.abs(p.x) <= zoneBox.halfWidth * 0.6 && Math.abs(p.y) <= zoneBox.halfHeight * 0.6);
+  const allSquares = graph.spaces.filter((s) => s.kind === 'square' || s.kind === 'pedestrian_area');
+  // la place du scénario est choisie dans le cœur de la zone de jeu (sinon la plus proche de l'origine)
+  const core = allSquares.filter((s) => inZoneCore(centroid(s.ring)));
+  const squares = (core.length ? core : [...allSquares].sort((a, b) => Math.hypot(centroid(a.ring).x, centroid(a.ring).y) - Math.hypot(centroid(b.ring).x, centroid(b.ring).y)).slice(0, 1)).sort((a, b) => areaOf(b.ring) - areaOf(a.ring));
   const plazaCenter = squares[0] ? centroid(squares[0].ring) : { x: 0, y: 0 };
   const plazaPt = snapPoint(plazaCenter);
   const plaza: Anchor = {
@@ -79,16 +84,21 @@ export function buildDemoScenario(graph: StreetGraph, opts: { cortegeSize?: numb
 
   // --- portes d'entrée/sortie : nœuds du graphe aux bords ouest et sud
   const nodes = Array.from({ length: graph.nodeCount }, (_, i) => ({ i, x: graph.nodeX[i] as number, y: graph.nodeY[i] as number }));
-  const west = nodes.filter((n) => Math.abs(n.y - plazaPt.y) < 250).sort((a, b) => a.x - b.x)[0] ?? nodes[0];
-  const south = nodes.filter((n) => Math.abs(n.x - plazaPt.x) < 250).sort((a, b) => a.y - b.y)[0] ?? nodes[0];
-  const gatewayWest: Anchor = { id: 'porte-ouest', kind: 'node', pos: { x: west!.x, y: west!.y }, radius: 15, label: 'Porte ouest de la zone', source: 'synthetic' };
-  const gatewaySouth: Anchor = { id: 'porte-sud', kind: 'node', pos: { x: south!.x, y: south!.y }, radius: 15, label: 'Porte sud de la zone', source: 'synthetic' };
+  const z = opts.zone;
+  const inZone = (n: { x: number; y: number }) => !z || (Math.abs(n.x) <= z.halfWidth * 0.95 && Math.abs(n.y) <= z.halfHeight * 0.95);
+  const usable = nodes.filter(inZone);
+  const pool = usable.length ? usable : nodes;
+  const west = pool.filter((n) => Math.abs(n.y - plazaPt.y) < 250).sort((a, b) => a.x - b.x)[0] ?? pool[0];
+  const south = pool.filter((n) => Math.abs(n.x - plazaPt.x) < 250).sort((a, b) => a.y - b.y)[0] ?? pool[0];
+  const gatewayWest: Anchor = { id: 'porte-ouest', kind: 'node', pos: { x: west!.x, y: west!.y }, radius: 15, label: 'Entrée ouest du secteur', source: 'synthetic' };
+  const gatewaySouth: Anchor = { id: 'porte-sud', kind: 'node', pos: { x: south!.x, y: south!.y }, radius: 15, label: 'Sortie sud du secteur', source: 'synthetic' };
 
   // --- chronologie : repères d'après l'itinéraire réel du cortège
   const size = opts.cortegeSize ?? 2500;
   const route = nav.findRoute(gatewayWest.pos, plaza.pos, 'crowd');
   const routeLen = route?.length ?? 600;
-  const etaS = Math.round(routeLen / 1.0 + size / (2 * 14) / 1.1);
+  // vitesse effective moyenne observée du cortège (relation densité-vitesse, rues étroites, replanification) ≈ 0,8 m/s
+  const etaS = Math.round(routeLen / 0.8 + 60);
   // arête à fermer : sur la route, bien devant la tête au moment de la fermeture, et avec un itinéraire de remplacement
   let closeEdge: number | null = null;
   if (route) {

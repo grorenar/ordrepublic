@@ -1,5 +1,4 @@
 import { LocalFrame, type LngLat, type Vec2 } from './mercator';
-import type { GameZone, StreetSegment } from '../state/types';
 
 /**
  * Ville schématique procédurale et déterministe (mode démonstration sans service externe).
@@ -75,32 +74,6 @@ export function blockKind(city: SchematicCity, k: number, l: number): BlockKind 
   if (r < 0.09) return 'park';
   if (r < 0.15) return 'plaza';
   return 'built';
-}
-
-/**
- * Segments de rue (entre deux intersections) dont les deux extrémités sont dans la zone de jeu.
- * Identifiants stables : `v{k}:{l}` (rue verticale k, tronçon l) / `h{l}:{k}`.
- */
-export function schematicSegments(city: SchematicCity, zone: GameZone): StreetSegment[] {
-  const out: StreetSegment[] = [];
-  const reach = Math.hypot(zone.halfWidth, zone.halfHeight);
-  const kMax = Math.ceil(reach / city.bx) + 1;
-  const lMax = Math.ceil(reach / city.by) + 1;
-  const inside = (p: Vec2) => Math.abs(p.x) <= zone.halfWidth && Math.abs(p.y) <= zone.halfHeight;
-  for (let k = -kMax; k <= kMax; k++) {
-    for (let l = -lMax; l <= lMax; l++) {
-      const a = fromGrid(city, { x: k * city.bx, y: l * city.by });
-      const bV = fromGrid(city, { x: k * city.bx, y: (l + 1) * city.by });
-      const bH = fromGrid(city, { x: (k + 1) * city.bx, y: l * city.by });
-      if (inside(a) && inside(bV)) {
-        out.push({ id: `v${k}:${l}`, points: [a, bV], name: k % city.majorEvery === 0 ? `Avenue ${k}` : `Rue ${k}` });
-      }
-      if (inside(a) && inside(bH)) {
-        out.push({ id: `h${l}:${k}`, points: [a, bH], name: l % city.majorEvery === 0 ? `Boulevard ${l}` : `Rue ${l}` });
-      }
-    }
-  }
-  return out;
 }
 
 /** Repère local associé à une origine (utilitaire commun au dessin et aux tests). */

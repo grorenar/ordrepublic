@@ -480,7 +480,7 @@ SUPPRIMÉS src/demo/demoScenario.ts   src/geo/streets.ts   tests/unit/streets.te
 | **3a** navigation | ✅ réalisée : graphe, grille spatiale, accrochage, A* (points virtuels, sens uniques, règle de sortie d'une rue bloquée), états de rue géométriques, parseur/constructeur OSM **sur fixture simulée**, graphe schématique, masque de marche |
 | **3b** noyau du moteur | ✅ réalisée : horloge, paramètres, journal causal, groupes (création causale, cortège, rassemblement statique, arrivée, attente/replanification, dispersion, **scission et jonction**), individus sans plafond, niveaux N0/N1/N2, benchmarks 5 000 → 250 000 |
 | **⏸ Validation intermédiaire** | **en attente de votre accord** |
-| **3c** | à faire : unités/véhicules et ordres, scénario de démonstration, intégration carte/UI, index de sélection, script de paquets OSM |
+| **3c** | ✅ réalisée (voir `PHASE3_3C.md`) : unités/véhicules et ordres simultanés, scénario de démonstration, moteur branché à l'interface, index de sélection, script de paquets OSM (testé sur fixtures uniquement) |
 | **3d** | à faire : interfaces de sprites, finition, benchmarks navigateur |
 
 Écarts assumés par rapport au plan v2.0 : (1) évaluation exacte par curseur au lieu de repères de sous-groupes ; (2) piétons bloqués seulement à saturation ; (3) la scission/jonction sont livrées dès 3b ; (4) le script `build-city-pack` et la sélection par index spatial passent en 3c ; (5) `T5` (installation sur place après attente) est reporté : un groupe en attente reste en attente et signale l'alerte de patience.

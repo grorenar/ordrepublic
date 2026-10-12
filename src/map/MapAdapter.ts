@@ -1,6 +1,4 @@
 import type { Bounds, LngLat, ViewState } from '../geo/mercator';
-import type { GameZone, StreetSegment } from '../state/types';
-import type { LocalFrame } from '../geo/mercator';
 
 export type MapStatus =
   | { state: 'loading' }
@@ -26,8 +24,6 @@ export interface MapAdapter {
   resize(): void;
   onMove(cb: () => void): () => void;
   onStatus(cb: (s: MapStatus) => void): () => void;
-  /** Segments de rue de la zone de jeu (best effort selon le fond ; peut être vide). */
-  getStreetSegments(frame: LocalFrame, zone: GameZone): StreetSegment[];
   setTactical(on: boolean): void;
   /** Origine de la partie : le fond schématique régénère sa ville autour de ce point. */
   setScenarioOrigin(origin: LngLat): void;

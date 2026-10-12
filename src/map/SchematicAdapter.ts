@@ -11,7 +11,6 @@ import {
   type Vec2,
   type ViewState,
 } from '../geo/mercator';
-import type { GameZone, StreetSegment } from '../state/types';
 import type { MapAdapter, MapStatus } from './MapAdapter';
 import {
   MAJOR_WIDTH,
@@ -23,7 +22,6 @@ import {
   fromGrid,
   makeSchematicCity,
   riverCenterY,
-  schematicSegments,
   streetWidth,
   toGrid,
   type SchematicCity,
@@ -93,13 +91,6 @@ export class SchematicAdapter implements MapAdapter {
     this.origin = origin;
     this.city = makeSchematicCity(origin);
     this.dirty = true;
-  }
-
-  getStreetSegments(frame: LocalFrame, zone: GameZone): StreetSegment[] {
-    if (Math.abs(frame.origin.lat - this.origin.lat) > 1e-9 || Math.abs(frame.origin.lng - this.origin.lng) > 1e-9) {
-      return [];
-    }
-    return schematicSegments(this.city, zone);
   }
 
   debugProject(p: LngLat): Vec2 {

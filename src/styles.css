@@ -59,7 +59,7 @@ a { color: #7dd3fc; }
 .brand { display: flex; align-items: center; gap: 10px; } .brand strong { letter-spacing: .14em; }
 .chip { font-size: 11px; padding: 2px 8px; border-radius: 99px; border: 1px solid var(--line); }
 .chip.demo { color: #fde68a; border-color: #854d0e; background: #2a2108; }
-.situation { display: flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 6px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; font-size: 12.5px; background: #0b3b2e; border: 1px solid #10b981; }
+.situation { display: flex; align-items: center; gap: 10px; padding: 6px 14px; border-radius: 6px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; font-size: 12.5px; background: #0b3b2e; border: 1px solid #10b981; }
 .situation.warm { background: #4a3205; border-color: var(--warn); } .situation.hot { background: #4c0f12; border-color: var(--alert); }
 .situation .dot { width: 9px; height: 9px; border-radius: 50%; background: currentColor; animation: blink 1.6s infinite; }
 .situation .clock { font-variant-numeric: tabular-nums; opacity: .9; margin-left: 6px; }
@@ -101,7 +101,7 @@ dl { margin: 0 0 8px; } dl div { display: flex; justify-content: space-between; 
 .map-area.hit-hover .maplibregl-canvas, .map-area.hit-hover .schematic-canvas { cursor: pointer !important; }
 .map-ui { position: absolute; z-index: 10; }
 .banners { left: 50%; transform: translateX(-50%); top: 12px; display: flex; flex-direction: column; gap: 6px; align-items: center; pointer-events: none; width: min(640px, 90%); }
-.banner { padding: 8px 18px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; font-size: 14px; border-radius: 4px; color: #fff; background: rgba(8,12,20,.9); border-left: 6px solid var(--blue); box-shadow: 0 6px 18px rgba(0,0,0,.45); animation: slide .25s ease-out; }
+.banner { padding: 6px 14px; font-weight: 700; letter-spacing: .02em; font-size: 13px; border-radius: 4px; color: #fff; background: rgba(8,12,20,.9); border-left: 6px solid var(--blue); box-shadow: 0 6px 18px rgba(0,0,0,.45); animation: slide .25s ease-out; }
 .banner.warn { border-color: var(--warn); } .banner.alert { border-color: var(--alert); background: rgba(70,10,14,.92); }
 @keyframes slide { from { transform: translateY(-12px); opacity: 0; } }
 .map-notice { left: 12px; right: 12px; bottom: 92px; display: flex; gap: 10px; align-items: center; padding: 8px 12px; border-radius: 8px; background: rgba(8,12,20,.94); border: 1px solid var(--blue); max-width: 760px; }
@@ -121,3 +121,22 @@ dl { margin: 0 0 8px; } dl div { display: flex; justify-content: space-between; 
   .map-area { height: 70vh; } .map-bottom { max-width: calc(100% - 24px); } .city-grid { grid-template-columns: repeat(2, 1fr); }
 }
 @media (prefers-reduced-motion: reduce) { .situation .dot, .banner { animation: none; } .meter i { transition: none; } }
+
+/* --- Phase 3c : moteur connecté à l'interface --- */
+.speeds { display: inline-flex; gap: 2px; margin-left: 8px; }
+.speeds button { padding: 2px 8px; min-width: 38px; font-size: 12px; font-weight: 700; text-transform: none; }
+.speeds button.on { background: var(--accent, #22d3ee); color: #04121a; border-color: transparent; }
+.counter small { font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.badge.police_nationale { background: #0369a1; } .badge.gendarmerie_mobile { background: #312e81; } .badge.unite_speciale { background: #374151; }
+.badge.vehicle { background: #334155; } .badge.group { background: #475569; }
+.btn-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
+.warn { color: #fcd34d; }
+.panel .small, .small { font-size: 12px; }
+details.why { margin-top: 4px; } details.why summary { cursor: pointer; color: var(--muted); font-size: 11.5px; }
+details.why ol { padding-left: 16px; margin: 4px 0; } details.why li { margin-bottom: 4px; }
+.legend { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
+.legend .sw { display: inline-block; width: 14px; height: 4px; border-radius: 2px; margin-left: 6px; }
+.legend .sw.slowed { background: #facc15; } .legend .sw.partial { background: #fb923c; } .legend .sw.blocked { background: #ff3b30; }
+.map-area.order-mode .maplibregl-canvas, .map-area.order-mode .schematic-canvas { cursor: crosshair !important; }
+.map-bottom { max-width: calc(100% - 24px); }
+.legend { background: rgba(8,12,20,.85); padding: 4px 8px; border-radius: 6px; color: #cbd5e1; }
