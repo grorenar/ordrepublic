@@ -23,6 +23,11 @@ import { DetailPanel, ForcesPanel, LogPanel, TopBar } from './panels';
 export interface DebugFlags {
   debug: boolean;
   providerOverride?: MapProviderId;
+  /** Test : nombre de tentatives du chargement OSM (défaut 10) et attente de base (ms). */
+  liveAttempts?: number;
+  liveRetryMs?: number;
+  /** Test de charge : ajoute une foule statique de N personnes sur la place du scénario. */
+  extraCrowd?: number;
 }
 
 interface Props {
@@ -98,7 +103,9 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
   ctrlRef.current = ctrl;
 
   const [aerial, setAerial] = useState(false);
-  const provider: MapProviderId = debug.providerOverride ?? (aerial ? 'ign-aerial' : settings.provider);
+  /** Vue mixte : noms de rues, de lieux et contours de bâtiments par-dessus la photo aérienne. */
+  const [labels, setLabels] = useState(true);
+  const provider: MapProviderId = debug.providerOverride ?? (aerial ? (labels ? 'ign-hybrid' : 'ign-aerial') : settings.provider);
   const origin: LngLat = live?.origin ?? city.center;
   const frame = useMemo(() => new LocalFrame(origin), [origin.lng, origin.lat]);
   const frameRef = useRef(frame);
@@ -130,7 +137,9 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
         return;
       }
       try {
-        setCtrl(new GameController({ graph: w.graph, zoneLevel }));
+        const gc = new GameController({ graph: w.graph, zoneLevel });
+        if (debug.extraCrowd) gc.addTestCrowd(debug.extraCrowd);
+        setCtrl(gc);
       } catch (err) {
         setFatal(`Initialisation du moteur impossible : ${err instanceof Error ? err.message : String(err)}`);
       }
@@ -155,7 +164,9 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
   useEffect(() => {
     if (!live) return;
     try {
-      setCtrl(new GameController({ graph: live.graph, zoneLevel }));
+      const gc = new GameController({ graph: live.graph, zoneLevel });
+      if (debug.extraCrowd) gc.addTestCrowd(debug.extraCrowd);
+      setCtrl(gc);
       setPreview(null);
       setLiveStatus({ state: 'idle', text: '', step: 0 });
     } catch (err) {
@@ -462,6 +473,8 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
       const r = await loadZoneGraph(center, ZONE_LEVELS[zoneLevel] as (typeof ZONE_LEVELS)[number], city.name, {
         cache: indexedDbCache(),
         signal: ctl.signal,
+        maxAttempts: debug.liveAttempts,
+        retryDelayMs: debug.liveRetryMs,
         onProgress: (text, step) => setLiveStatus({ state: 'loading', text, step }),
       });
       // étape 3 : démarrage du moteur (l'écran de chargement reste affiché jusqu'à ce que la simulation soit prête)
@@ -626,8 +639,14 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
           </button>
           {mapKind === 'osm' && (
             <button type="button" data-testid="toggle-aerial" aria-pressed={aerial} onClick={() => setAerial((v) => !v)} title="Basculer entre le plan et la vue aérienne (IGN, France)">
-              {aerial ? 'Vue : aérienne (IGN)' : 'Vue : plan'}
+              {aerial ? (labels ? 'Vue : aérienne + noms' : 'Vue : aérienne (IGN)') : 'Vue : plan'}
             </button>
+          )}
+          {mapKind === 'osm' && aerial && (
+            <label class="check small">
+              <input type="checkbox" data-testid="toggle-labels" checked={labels} onChange={(e) => setLabels((e.target as HTMLInputElement).checked)} />
+              Noms de rues et lieux
+            </label>
           )}
           <label class="check small">
             <input type="checkbox" checked={tactical} disabled={mapKind === 'schematic'} onChange={(e) => setTactical((e.target as HTMLInputElement).checked)} />

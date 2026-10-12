@@ -43,3 +43,10 @@ Branche `claude/cahier-des-charges-phase1`. Périmètre : cahier §8.4 (incident
 ## Suite prévue (demandée, non commencée)
 
 Réaction de la foule à un incident : détachement d'une partie du cortège qui reste sur les lieux, puis, à l'arrivée des secours ou des forces, dispersion, fuite ou dégénérescence (jets abstraits). Exigences consignées au cahier §8.4 (dont les affrontements et leur possible dégénérescence, sans données opérationnelles réelles) ; elle s'implémentera avec les comportements individuels (phase 5) et les secours (phase 6). Points d'accroche déjà en place : `splitGroup` (scission causale), `Incident.groupId`, `CrowdGroup.tension / cohesion / affectedUntilMs`, présence d'unités (`unitNear`), états d'incident.
+
+## Retours d'essai (après livraison)
+
+- Chargement OSM à la demande : jusqu'à **10 tentatives** (services alternés, attente croissante, annulable) avant l'échec ; la progression affiche « tentative n/10 ».
+- Incidents moins fréquents (taux 0,003/s, réarmement 150 s, 6 actifs maximum) ; coût fictif compté dès que le feu a pris ; la gravité est expliquée dans le panneau (1 départ de feu limité … 5 embrasement généralisé).
+- URL `?foule=N` : ajoute un rassemblement d'essai de N personnes (test de charge).
+- Vue aérienne mixte : noms de rues et de lieux + contours de bâtiments (OpenFreeMap) par-dessus la photo IGN, case « Noms de rues et lieux ». Non vérifiée sur les vrais services (pas de réseau ici).

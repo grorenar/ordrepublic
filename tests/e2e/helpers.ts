@@ -7,7 +7,7 @@ export interface Target {
 }
 
 export async function openGame(page: Page, query: string): Promise<void> {
-  await page.goto(`/?debug&${query}`);
+  await page.goto(`/?debug&attempts=1&${query}`);
   await expect(page.getByTestId('game')).toBeVisible();
   await expect(page.getByTestId('game')).toHaveAttribute('data-map-state', 'ready', { timeout: 20_000 });
   await expect(page.getByTestId('game')).toHaveAttribute('data-engine', 'ready', { timeout: 20_000 });

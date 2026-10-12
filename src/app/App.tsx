@@ -13,7 +13,13 @@ function parseFlags(): { debug: DebugFlags; autostart?: City; schematic?: boolea
   const map = q.get('map');
   const providerOverride: MapProviderId | undefined = map === 'test' ? 'test-local' : undefined;
   return {
-    debug: { debug: q.has('debug'), providerOverride },
+    debug: {
+      debug: q.has('debug'),
+      providerOverride,
+      liveAttempts: q.has('attempts') ? Number(q.get('attempts')) : undefined,
+      liveRetryMs: q.has('retryms') ? Number(q.get('retryms')) : undefined,
+      extraCrowd: q.has('foule') ? Math.max(0, Math.min(200000, Number(q.get('foule')) || 0)) : undefined,
+    },
     autostart: findPresetCity(q.get('autostart') ?? ''),
     schematic: map === 'schematic' ? true : map === 'osm' || map === 'test' ? false : undefined,
   };

@@ -2,7 +2,8 @@ import { Map as MLMap, setWorkerUrl, type StyleSpecification } from 'maplibre-gl
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { Bounds, LngLat, ViewState } from '../geo/mercator';
-import { MAP_PROVIDERS, MIN_ZOOM, STYLE_LOAD_TIMEOUT_MS, type MapProviderId } from '../config/mapConfig';
+import { hybridOverlay } from './hybrid';
+import { MAP_PROVIDERS, MIN_ZOOM, OPENFREEMAP_GLYPHS, OPENFREEMAP_STYLE_URL, STYLE_LOAD_TIMEOUT_MS, type MapProviderId } from '../config/mapConfig';
 import type { MapAdapter, MapStatus } from './MapAdapter';
 
 export interface MapLibreOptions {
@@ -28,6 +29,14 @@ export function buildStyle(
     return customStyleUrl;
   }
   if (provider === 'test-local') return buildTestStyle(center);
+  if (provider === 'ign-hybrid') {
+    return {
+      version: 8,
+      glyphs: OPENFREEMAP_GLYPHS,
+      sources: { base: { type: 'raster', tiles: cfg.rasterTiles ?? [], tileSize: 256, maxzoom: cfg.maxZoom, attribution: cfg.attribution ?? '' } },
+      layers: [{ id: 'base', type: 'raster', source: 'base' }],
+    };
+  }
   if (cfg.styleUrl) return cfg.styleUrl;
   return {
     version: 8,
@@ -126,6 +135,7 @@ export class MapLibreAdapter implements MapAdapter {
       this.map.once('style.load', () => {
         this.styleLoaded = true;
       });
+      if (opts.provider === 'ign-hybrid') void this.addLabels();
       this.map.once('load', () => {
         clearTimeout(timer);
         this.loaded = true;
@@ -162,6 +172,26 @@ export class MapLibreAdapter implements MapAdapter {
     this.map.on('move', () => this.moveCbs.forEach((cb) => cb()));
     this.ro = new ResizeObserver(() => this.map.resize());
     this.ro.observe(container);
+  }
+
+  /** Vue mixte : ajoute noms et contours depuis le style vectoriel ; sans réseau, la photo reste affichée seule (non bloquant). */
+  private async addLabels(): Promise<void> {
+    try {
+      const ctl = new AbortController();
+      const t = setTimeout(() => ctl.abort(), 12_000);
+      const res = await fetch(OPENFREEMAP_STYLE_URL, { signal: ctl.signal });
+      clearTimeout(t);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const overlay = hybridOverlay((await res.json()) as StyleSpecification);
+      const add = () => {
+        for (const [id, src] of Object.entries(overlay.sources)) if (!this.map.getSource(id)) this.map.addSource(id, src);
+        for (const l of overlay.layers) if (!this.map.getLayer(l.id)) this.map.addLayer(l);
+      };
+      if (this.map.isStyleLoaded()) add();
+      else this.map.once('style.load', add);
+    } catch (e) {
+      console.warn('[Ordre Public] noms de rues indisponibles pour la vue mixte :', e);
+    }
   }
 
   getView(): ViewState {

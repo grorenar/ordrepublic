@@ -4,7 +4,7 @@ import { sameRef } from '../game/selection';
 import { FORCE_CODE, VEHICLE_LABEL } from '../render/GameRenderer';
 import type { CrowdGroup, ForceKind, IncidentState, LogEvent, MoverEntity, Poi, PoiState, UnitStatus } from '../engine/types';
 import type { SimSpeed } from '../engine/clock';
-import { DECOR_KIND_LABEL } from '../engine/incidents';
+import { DECOR_KIND_LABEL, severityMeaning } from '../engine/incidents';
 import type { City } from '../state/types';
 import { clockText, dayPart } from '../game/daylight';
 import type { Vec2 } from '../geo/mercator';
@@ -303,7 +303,7 @@ export function DetailPanel({ ctrl, orderMode, onOrderMode, onCenter, onClose }:
       title = i.label;
       rows = [
         ['État', INCIDENT_STATE_LABEL[i.state]],
-        ['Gravité', `${i.severity} / 5`],
+        ['Gravité', `${i.severity} / 5 — ${severityMeaning(i.kind, i.severity)}`],
         ['Depuis', clockText(ctrl.dayStartSec + i.startedAtMs / 1000)],
         ['Coût fictif', `${Math.round(i.costEur).toLocaleString('fr-FR')} €`],
         ['Cible', `${DECOR_KIND_LABEL[sim.world.item(i.targetDecorId)?.kind ?? 'debris']} (objet de scénario fictif)`],

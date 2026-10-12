@@ -100,10 +100,10 @@ Contrôles de cohérence appliqués à la création d’un `Sim` (`validateSimPa
 | `incidents.everyTicks` | ticks | 10 | Période d’évaluation des incidents. | Plus grand : moins de calcul, réactivité moindre (10 ticks = 1 s de jeu). |
 | `incidents.triggerTension` | 0–100 | 40 | Tension d’un groupe à partir de laquelle il peut provoquer un incident. | Plus haut : la foule doit être plus tendue avant le moindre dégât. |
 | `incidents.reachM` | m | 25 | Distance entre un individu du groupe et un objet pour qu’il soit à portée. | Plus grand : plus d’objets exposés autour d’une foule. |
-| `incidents.baseRatePerS` | 1/s | 0.01 | Probabilité par seconde de dégradation d’un objet à portée d’une grande foule à tension maximale. | Pondérée par la tension au-dessus du seuil et par la taille de la foule ; réduite si une unité est proche. |
+| `incidents.baseRatePerS` | 1/s | 0.003 | Probabilité par seconde de dégradation d’un objet à portée d’une grande foule à tension maximale. | Pondérée par la tension au-dessus du seuil et par la taille de la foule ; réduite si une unité est proche. |
 | `incidents.crowdFullSize` | personnes | 900 | Effectif à partir duquel la taille de la foule ne réduit plus la probabilité. | Sous cet effectif, la probabilité est proportionnelle à la racine de l’effectif. |
-| `incidents.cooldownS` | s | 60 | Délai avant qu’un même groupe provoque un nouvel incident. | Évite les rafales d’incidents d’un seul groupe. |
-| `incidents.maxActive` | incidents | 12 | Nombre maximal d’incidents actifs simultanés. | Plafonne la charge de calcul et la lisibilité. |
+| `incidents.cooldownS` | s | 150 | Délai avant qu’un même groupe provoque un nouvel incident. | Évite les rafales d’incidents d’un seul groupe. |
+| `incidents.maxActive` | incidents | 6 | Nombre maximal d’incidents actifs simultanés. | Plafonne la charge de calcul et la lisibilité. |
 | `incidents.unitWatchM` | m | 30 | Distance d’une unité qui surveille un incident ou un objet. | Une unité proche dissuade (déclenchement réduit) et permet de confiner un incendie. |
 | `incidents.unitDeterrence` | multiple (0–1) | 0.25 | Multiplicateur de la probabilité de déclenchement à portée d’une unité. | Plus bas : la présence d’unités protège mieux le mobilier. |
 | `incidents.containAfterS` | s | 20 | Présence continue d’une unité pour confiner un incendie (périmètre tenu, plus de propagation). | Le confinement n’éteint pas le feu : l’extinction relève des secours (phase 6). |

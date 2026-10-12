@@ -61,6 +61,16 @@ export class GameController {
     this.updateFoci();
   }
 
+  /** Test de charge (URL `?foule=N`) : ajoute un rassemblement statique de N personnes sur la place du scénario, avec une cause explicite. */
+  addTestCrowd(n: number): void {
+    if (n <= 0) return;
+    const p = this.scenario.places.plaza.pos;
+    this.sim.createGroup(
+      { label: 'Foule d’essai', kind: 'static', size: Math.round(n), origin: p, anchor: { id: 'essai', kind: 'place', pos: p, radius: 30, label: 'Test de charge', source: 'synthetic' } },
+      { kind: 'rule', refId: 'test-charge', note: `test de charge demandé par l’URL (${Math.round(n)} personnes)` },
+    );
+  }
+
   // ------------------------------------------------------------------ temps
 
   get speed(): SimSpeed {

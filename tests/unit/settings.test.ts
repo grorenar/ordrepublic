@@ -39,3 +39,38 @@ describe('vue aérienne IGN', () => {
     expect(JSON.stringify(st)).not.toMatch(/key=|apikey|token/i);
   });
 });
+
+describe('vue mixte : photo aérienne + noms', () => {
+  const vector = {
+    version: 8,
+    sources: { openmaptiles: { type: 'vector', url: 'https://tiles.example/planet' }, autre: { type: 'vector', url: 'https://x/y' } },
+    layers: [
+      { id: 'background', type: 'background', paint: {} },
+      { id: 'water', type: 'fill', source: 'openmaptiles', 'source-layer': 'water' },
+      { id: 'building', type: 'fill', source: 'openmaptiles', 'source-layer': 'building' },
+      { id: 'highway_name', type: 'symbol', source: 'openmaptiles', 'source-layer': 'transportation_name', layout: { 'text-field': '{name}', 'text-font': ['Noto Sans Regular'], 'icon-image': 'shield', 'symbol-placement': 'line' }, paint: { 'text-color': '#000' } },
+      { id: 'poi', type: 'symbol', source: 'openmaptiles', 'source-layer': 'poi', layout: { 'icon-image': 'x' } },
+    ],
+  } as unknown as import('maplibre-gl').StyleSpecification;
+
+  it('ne reprend que les textes (sans pictogrammes, recolorés lisibles) et les contours de bâtiments', async () => {
+    const { hybridOverlay } = await import('../../src/map/hybrid');
+    const o = hybridOverlay(vector);
+    expect(o.layers.map((l) => l.id)).toEqual(['hyb-building-outline', 'hyb-highway_name']);
+    const label = o.layers.find((l) => l.id === 'hyb-highway_name') as unknown as { layout: Record<string, unknown>; paint: Record<string, unknown>; source: string };
+    expect(label.layout['icon-image']).toBeUndefined();
+    expect(label.layout['text-field']).toBe('{name}');
+    expect(label.paint['text-color']).toBe('#ffffff');
+    expect(String(label.paint['text-halo-color'])).toContain('rgba(0,0,0');
+    expect(Object.keys(o.sources)).toEqual(['hyb-openmaptiles']); // seules les sources utilisées
+    expect(label.source).toBe('hyb-openmaptiles');
+    expect((o.layers[0] as unknown as { type: string }).type).toBe('line');
+  });
+
+  it('style de base : photo IGN + glyphes OpenFreeMap, attributions IGN et OSM', () => {
+    const st = buildStyle('ign-hybrid', undefined, { lng: 6.17, lat: 49.11 }) as unknown as { glyphs: string; sources: { base: { attribution: string } } };
+    expect(st.glyphs).toContain('openfreemap');
+    expect(st.sources.base.attribution).toContain('IGN');
+    expect(st.sources.base.attribution).toContain('OpenStreetMap');
+  });
+});

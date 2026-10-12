@@ -93,7 +93,7 @@ describe('déclenchement par la foule (règle explicite, jamais gratuit)', () =>
     const count = (withUnit: boolean) => {
       let n = 0;
       for (let seed = 1; seed <= 6; seed++) {
-        const sim = makeSim({ seed });
+        const sim = makeSim({ seed, params: { incidents: { baseRatePerS: 0.01, cooldownS: 20, maxActive: 12 } } });
         const bin = firstOf(sim, 'bin');
         if (withUnit) sim.addUnit({ force: 'crs', callsign: 'CRS test', num: '01', headcount: 20, pos: { x: bin.x + 3, y: bin.y } }, PLAN);
         crowdAt(sim, bin.x, bin.y, { tension: 70 });

@@ -237,6 +237,11 @@ test.describe('fournisseur OpenStreetMap par défaut', () => {
     const v0 = await view(page);
     await page.getByTestId('toggle-aerial').click();
     await expect(page.getByTestId('toggle-aerial')).toHaveText(/aérienne/);
+    await expect(page.getByTestId('toggle-labels')).toBeChecked(); // vue mixte : noms de rues et lieux par défaut
+    await page.getByTestId('toggle-labels').uncheck();
+    await expect(page.getByTestId('toggle-aerial')).toHaveText(/aérienne \(IGN\)/);
+    await page.getByTestId('toggle-labels').check();
+    await expect(page.getByTestId('toggle-aerial')).toHaveText(/aérienne \+ noms/);
     await expect(page.locator('.maplibregl-ctrl-attrib')).toContainText('IGN', { timeout: 15_000 });
     await expect.poll(() => tileHits.length, { timeout: 15_000 }).toBeGreaterThan(0);
     expect(tileHits[0]).toContain('ORTHOIMAGERY.ORTHOPHOTOS');
@@ -247,10 +252,26 @@ test.describe('fournisseur OpenStreetMap par défaut', () => {
     await expect(page.getByTestId('toggle-aerial')).toHaveText(/plan/);
   });
 
+  test('« Jouer ici » : un service saturé qui finit par répondre (3 échecs puis succès) : le chargement réussit tout seul, avec les tentatives affichées', async ({ page }) => {
+    await mockStyle(page);
+    let n = 0;
+    await page.route(OVERPASS, async (route) => {
+      n++;
+      if (n <= 3) return route.fulfill({ status: n === 2 ? 504 : 429, body: 'saturé' });
+      await route.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(overpassGrid(METZ)) });
+    });
+    await page.goto('/?debug&autostart=metz&retryms=300');
+    await expect(page.getByTestId('game')).toHaveAttribute('data-engine', 'preview', { timeout: 20_000 });
+    await page.getByTestId('play-here').click();
+    await expect(page.getByTestId('live-progress')).toContainText(/tentative|Nouvelle tentative/, { timeout: 10_000 });
+    await expect(page.getByTestId('game')).toHaveAttribute('data-engine', 'ready', { timeout: 30_000 });
+    expect(n).toBe(4);
+  });
+
   test('« Jouer ici » : service surchargé (429) → message explicite, la carte et le choix de secteur restent disponibles', async ({ page }) => {
     await mockStyle(page);
     await page.route(OVERPASS, (route) => route.fulfill({ status: 429, body: 'trop de requêtes' }));
-    await page.goto('/?debug&autostart=metz');
+    await page.goto('/?debug&autostart=metz&attempts=1');
     await expect(page.getByTestId('game')).toHaveAttribute('data-engine', 'preview', { timeout: 20_000 });
     await page.getByTestId('play-here').click();
     await expect(page.getByTestId('live-error')).toContainText('surchargé');
@@ -261,7 +282,7 @@ test.describe('fournisseur OpenStreetMap par défaut', () => {
   test('« Jouer ici » : service injoignable → message explicite, aucun blocage', async ({ page }) => {
     await mockStyle(page);
     await page.route('**/api/interpreter', (route) => route.abort('failed'));
-    await page.goto('/?debug&autostart=metz');
+    await page.goto('/?debug&autostart=metz&attempts=1');
     await expect(page.getByTestId('game')).toHaveAttribute('data-engine', 'preview', { timeout: 20_000 });
     await page.getByTestId('play-here').click();
     await expect(page.getByTestId('live-error')).toContainText('injoignable', { timeout: 20_000 });

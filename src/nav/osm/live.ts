@@ -16,6 +16,9 @@ export const OVERPASS_ENDPOINTS = ['https://overpass-api.de/api/interpreter', 'h
 export const LIVE_MARGIN_M = 80;
 export const LIVE_TIMEOUT_MS = 60_000;
 export const MIN_EDGES = 10;
+/** Les services Overpass publics sont souvent saturés : on réessaie jusqu'à 10 fois (attente croissante) avant de déclarer l'échec. */
+export const LIVE_MAX_ATTEMPTS = 10;
+export const LIVE_RETRY_DELAY_MS = 1500;
 
 export class LiveLoadError extends Error {
   constructor(
@@ -36,6 +39,10 @@ export interface LiveOptions {
   endpoints?: string[];
   cache?: ZoneCache | null;
   timeoutMs?: number;
+  /** Nombre maximal de tentatives (toutes erreurs de service confondues), défaut 10. */
+  maxAttempts?: number;
+  /** Attente de base entre deux tentatives (ms) ; croît linéairement (×n), plafonnée à 8×. Défaut 1500. */
+  retryDelayMs?: number;
   /** Étape 1 = téléchargement, 2 = construction du graphe (3 = démarrage, géré par l'interface). */
   onProgress?: (text: string, step: number) => void;
   /** Permet au joueur d'annuler le chargement. */
@@ -79,8 +86,12 @@ export async function loadZoneGraph(center: LngLat, half: { halfWidth: number; h
   let json: unknown = null;
   let used = '';
   let lastErr: LiveLoadError | null = null;
-  for (const endpoint of o.endpoints ?? OVERPASS_ENDPOINTS) {
-    progress(`Téléchargement des rues et bâtiments OpenStreetMap (${new URL(endpoint).host})…`, 1);
+  const endpoints = o.endpoints ?? OVERPASS_ENDPOINTS;
+  const maxAttempts = Math.max(1, o.maxAttempts ?? LIVE_MAX_ATTEMPTS);
+  const baseDelay = o.retryDelayMs ?? LIVE_RETRY_DELAY_MS;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const endpoint = endpoints[(attempt - 1) % endpoints.length] as string;
+    progress(`Téléchargement des rues et bâtiments OpenStreetMap (${new URL(endpoint).host})${maxAttempts > 1 ? ` — tentative ${attempt}/${maxAttempts}` : ''}…`, 1);
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), o.timeoutMs ?? LIVE_TIMEOUT_MS);
     const onAbort = () => ctl.abort();
@@ -88,32 +99,34 @@ export async function loadZoneGraph(center: LngLat, half: { halfWidth: number; h
     try {
       const res = await fetchFn(endpoint, { method: 'POST', body: new URLSearchParams({ data: query }), signal: ctl.signal });
       if (res.status === 429 || res.status === 504) {
-        // le service limite l'usage : on n'insiste pas (politique d'usage), message explicite
-        throw new LiveLoadError(`Le service Overpass est surchargé ou limite l'usage (HTTP ${res.status}). Réessayez dans quelques minutes ou choisissez une zone plus petite.`, 'overloaded');
-      }
-      if (!res.ok) {
+        lastErr = new LiveLoadError(`Le service Overpass est surchargé ou limite l'usage (HTTP ${res.status}).`, 'overloaded');
+      } else if (!res.ok) {
         lastErr = new LiveLoadError(`Le service Overpass a répondu HTTP ${res.status}.`, 'network');
-        continue;
-      }
-      json = await res.json();
-      used = endpoint;
-      break;
-    } catch (e) {
-      if (e instanceof LiveLoadError) {
-        if (e.kind === 'overloaded') throw e;
-        lastErr = e;
-      } else if (o.signal?.aborted) {
-        throw cancelled();
-      } else if (e instanceof DOMException && e.name === 'AbortError') {
-        lastErr = new LiveLoadError('Délai dépassé : le service Overpass ne répond pas.', 'timeout');
       } else {
-        lastErr = new LiveLoadError('Service Overpass injoignable (réseau, bloqueur de contenu ou service indisponible).', 'network');
+        json = await res.json();
+        used = endpoint;
+        break;
       }
+    } catch (e) {
+      if (o.signal?.aborted) throw cancelled();
+      if (e instanceof DOMException && e.name === 'AbortError') lastErr = new LiveLoadError('Délai dépassé : le service Overpass ne répond pas.', 'timeout');
+      else lastErr = new LiveLoadError('Service Overpass injoignable (réseau, bloqueur de contenu ou service indisponible).', 'network');
     } finally {
       clearTimeout(timer);
       o.signal?.removeEventListener('abort', onAbort);
     }
+    if (attempt < maxAttempts) {
+      // attente croissante (politesse envers un service public), interrompue par l'annulation du joueur
+      const wait = baseDelay * Math.min(8, attempt);
+      progress(`${(lastErr as LiveLoadError).message} Nouvelle tentative dans ${Math.max(1, Math.round(wait / 1000))} s (${attempt}/${maxAttempts} échouée${attempt > 1 ? 's' : ''})…`, 1);
+      await new Promise<void>((res) => {
+        const t = setTimeout(res, wait);
+        o.signal?.addEventListener('abort', () => (clearTimeout(t), res()), { once: true });
+      });
+      if (o.signal?.aborted) throw cancelled();
+    }
   }
+  if (json === null && lastErr) lastErr = new LiveLoadError(`${lastErr.message} Échec après ${maxAttempts} tentative${maxAttempts > 1 ? 's' : ''}. Réessayez dans quelques minutes ou choisissez une zone plus petite.`, lastErr.kind);
   if (json === null) throw lastErr ?? new LiveLoadError('Aucun service Overpass disponible.', 'network');
 
   if (o.signal?.aborted) throw cancelled();

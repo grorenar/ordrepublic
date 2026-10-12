@@ -14,7 +14,7 @@
  *  - Nominatim public : 1 requête/s maximum pour l'ensemble de l'application, Referer ou User-Agent
  *    identifiant l'application, pas de requêtes périodiques ; mise en cache recommandée.
  */
-export type MapProviderId = 'openfreemap' | 'osm-raster' | 'ign-aerial' | 'custom-style' | 'test-local';
+export type MapProviderId = 'openfreemap' | 'osm-raster' | 'ign-aerial' | 'ign-hybrid' | 'custom-style' | 'test-local';
 
 export interface MapProviderConfig {
   id: MapProviderId;
@@ -55,6 +55,16 @@ export const MAP_PROVIDERS: Record<MapProviderId, MapProviderConfig> = {
     attribution: '© <a href="https://geoservices.ign.fr/">IGN</a> — Géoplateforme (Licence Ouverte Etalab 2.0)',
     maxZoom: 19,
   },
+  'ign-hybrid': {
+    id: 'ign-hybrid',
+    label: 'Vue aérienne + noms de rues et lieux (IGN + OpenFreeMap)',
+    description: 'Photographies aériennes de l’IGN avec, par-dessus, les noms de rues, de lieux et les contours de bâtiments issus d’OpenStreetMap (OpenFreeMap). Couverture aérienne : France.',
+    rasterTiles: [
+      'https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/jpeg',
+    ],
+    attribution: '© <a href="https://geoservices.ign.fr/">IGN</a> — Géoplateforme (Licence Ouverte Etalab 2.0) · © <a href="https://www.openstreetmap.org/copyright">contributeurs OpenStreetMap</a> · <a href="https://openfreemap.org">OpenFreeMap</a>',
+    maxZoom: 19,
+  },
   'custom-style': {
     id: 'custom-style',
     label: 'Style MapLibre personnalisé',
@@ -74,3 +84,7 @@ export const DEFAULT_GEOCODER_URL = 'https://nominatim.openstreetmap.org/search'
 export const STYLE_LOAD_TIMEOUT_MS = 10_000;
 export const MIN_ZOOM = 11;
 export const DEFAULT_ZOOM = 17;
+
+/** Style vectoriel dont on reprend les noms (rues, lieux) et contours de bâtiments pour la vue mixte. */
+export const OPENFREEMAP_STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty';
+export const OPENFREEMAP_GLYPHS = 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf';

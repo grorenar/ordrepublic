@@ -294,6 +294,8 @@ export class IncidentSystem {
           if (poi.state === 'intact') poi.state = 'damaged';
         }
       }
+      if (inc.kind === 'bin_fire') inc.costEur += ip.costBinEur;
+      if (inc.kind === 'fire' && it?.kind === 'container') inc.costEur += ip.costContainerEur;
       if (inc.kind === 'window_break') inc.costEur += ip.costWindowEur;
       if (inc.kind === 'furniture_damage') inc.costEur += it?.kind === 'bus_shelter' ? ip.costShelterEur : ip.costBenchEur;
       this.record(inc, 'incident.active', `${inc.label} : ${isFire(inc.kind) ? 'le feu a pris' : 'dégâts constatés'}.`, { kind: 'transition', refId: inc.id, note: 'fin de la phase naissante' }, 'alert');
@@ -350,8 +352,6 @@ export class IncidentSystem {
     if (now >= inc.stateSinceMs + inc.durationMs) {
       if (isFire(inc.kind)) {
         if (it && it.state !== 'destroyed') it.state = 'burnt';
-        if (it?.kind === 'bin') inc.costEur += ip.costBinEur;
-        if (it?.kind === 'container') inc.costEur += ip.costContainerEur;
       }
       this.setState(inc, 'lingering', ip.lingerS * 1000);
       this.record(inc, 'incident.ended', `${inc.label} : ${isFire(inc.kind) ? 'le feu s’éteint de lui-même' : 'fin de l’acte'}, persistance (fumée, ruines).`, { kind: 'transition', refId: inc.id, note: 'durée naturelle écoulée' });
@@ -384,3 +384,9 @@ export class IncidentSystem {
 
 export const INCIDENT_LABEL = KIND_LABEL;
 export const DECOR_KIND_LABEL = DECOR_LABEL;
+
+/** Signification concrète de la gravité (1–5) d'un incident, affichée dans le panneau de détail. */
+export function severityMeaning(kind: IncidentKind, severity: number): string {
+  if (kind === 'window_break' || kind === 'furniture_damage') return 'dégradation ponctuelle, sans propagation';
+  return ['', 'départ de feu limité à l’objet', 'feu installé : fumée, dégâts sur l’objet', 'feu étendu : peut gagner du mobilier et des vitrines voisins', 'feu violent : propagation et dégâts rapides', 'embrasement généralisé'][severity] ?? '';
+}
