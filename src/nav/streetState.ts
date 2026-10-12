@@ -14,6 +14,9 @@ export interface EdgeState {
   scenarioBlock: Uint8Array;
   /** Largeur praticable à pied (m) : espace libre entre façades. `edgeWidth` reste la chaussée (véhicules). */
   walkWidth: Float32Array;
+  /** Espace praticable de chaque côté de l'axe (a→b : gauche / droite) : corridor asymétrique pour le placement latéral. */
+  walkLeft: Float32Array;
+  walkRight: Float32Array;
   /** Longueur maximale (m) de l'arête couverte par une foule (0 = aucune information : on suppose toute la longueur). */
   presence: Float32Array;
   /** Largeur (m) de la section de rue occupée par les foules présentes (0 = aucune information). */
@@ -36,6 +39,8 @@ export function createEdgeState(g: StreetGraph): EdgeState {
   return {
     scenarioBlock: new Uint8Array(n),
     walkWidth: Float32Array.from(g.edgeWidth),
+    walkLeft: Float32Array.from(g.edgeWidth, (w) => w / 2),
+    walkRight: Float32Array.from(g.edgeWidth, (w) => w / 2),
     presence: new Float32Array(n),
     section: new Float32Array(n),
     load: new Float32Array(n),
@@ -50,7 +55,17 @@ export function createEdgeState(g: StreetGraph): EdgeState {
 
 /** Emprise d'une foule pour le calcul de charge. */
 export type CrowdFootprint =
-  | { kind: 'march'; route: Route; centreS: number; columnLength: number; size: number; frontWidth: number }
+  | {
+      kind: 'march';
+      route: Route;
+      centreS: number;
+      columnLength: number;
+      size: number;
+      frontWidth: number;
+      /** Profil de colonne (aire cumulée, largeur de front locale) : charge par arête = densité × aire occupée. */
+      profile?: { area(s: number): number; frontAt(s: number): number };
+      density?: number;
+    }
   | { kind: 'static'; center: Vec2; radius: number; size: number; density: number };
 
 /** Longueur (m) du segment [a,b] située dans le disque (c, r). */
@@ -137,7 +152,11 @@ export function accumulateLoads(
         const a = f.route.edgeStart[i] as number;
         const b = f.route.edgeStart[i + 1] as number;
         const ov = Math.min(b, s1) - Math.max(a, s0);
-        if (ov > 0) add(fi, f.route.edges[i] as number, perMeter * ov, ov, f.frontWidth);
+        if (ov <= 0) continue;
+        const e0 = Math.max(a, s0);
+        const e1 = Math.min(b, s1);
+        if (f.profile && f.density) add(fi, f.route.edges[i] as number, f.density * (f.profile.area(e1) - f.profile.area(e0)), ov, f.profile.frontAt((e0 + e1) / 2));
+        else add(fi, f.route.edges[i] as number, perMeter * ov, ov, f.frontWidth);
       }
     } else {
       const edges = grid.edgesInDisc(f.center, f.radius + 5);

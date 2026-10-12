@@ -45,6 +45,8 @@ export interface OpenSpace {
 
 export interface Obstacle {
   ring: Float32Array;
+  /** Nature du bâtiment quand elle est connue (étiquettes OSM) : sert à placer un piquet devant une VRAIE administration. */
+  kind?: 'administration';
   /** Nom OSM éventuel (affiché tel quel, décision v0.4) ; absent pour les objets synthétiques. */
   name?: string;
   source: Provenance;

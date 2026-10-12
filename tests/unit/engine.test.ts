@@ -194,8 +194,8 @@ describe('cohérence spatiale des individus', () => {
       }
       worst = Math.max(worst, best);
     }
-    // largeur maximale du front 14 m → demi-largeur 7 m, plus l'extension d'arrivée éventuelle
-    expect(worst).toBeLessThan(7.5);
+    // front maximal : 14 m en rue, jusqu'à 40 m en espace ouvert (place) → demi-largeur ≤ 20 m + décalage du corridor
+    expect(worst).toBeLessThan(sim.params.openSpaceFrontMaxM / 2 + 6);
   });
 
   it('aucun déplacement instantané : le déplacement individuel par tick reste borné (N1 et N2)', () => {
@@ -278,9 +278,9 @@ describe('rues bloquées : replanification, attente, reprise (T3, T3b, T4)', () 
     expect(g.speedMps).toBe(0);
     const w = sim.journal.byCode('group.waiting')[0]!;
     expect(w.why.refId).toBe('barrage');
-    const frozen = g.sCentre;
+    const frozen = g.sCentre + g.columnLength / 2;
     sim.run(100);
-    expect(g.sCentre).toBe(frozen); // reste sur place
+    expect(g.sCentre + g.columnLength / 2).toBeCloseTo(frozen, 6); // la tête reste sur place (la colonne se tasse derrière)
     sim.run(150);
     expect(sim.journal.byCode('group.patience_exceeded').length).toBe(1);
     sim.openStreet(edge, { kind: 'scenario_event', refId: 'fin-barrage', note: 'fin du barrage' });

@@ -32,8 +32,16 @@ export interface SimParams {
   crowdAccelMps2: number;
   /** Densité (personnes/m²) d'un cortège à l'arrêt bloqué : il se tasse en bloc contre l'obstacle, sur toute la largeur praticable. */
   waitDensity: number;
-  /** Largeur praticable maximale retenue pour une rue (m) ; mesurée façade à façade avec les bâtiments. */
-  walkWidthMaxM: number;
+  /** Demi-largeur praticable maximale (m) de chaque côté de l'axe d'une rue ; mesurée avec les bâtiments, espaces ouverts compris. */
+  walkHalfWidthMaxM: number;
+  /** Distance maximale (m) à laquelle une façade borde la rue ; au-delà, seul un espace ouvert cartographié élargit le corridor. */
+  streetHalfWidthM: number;
+  /** Largeur praticable (m) à partir de laquelle un cortège peut déborder la largeur de front des rues (places, esplanades). */
+  openSpaceWidthM: number;
+  /** Largeur maximale du front d'un cortège dans un espace ouvert (m). */
+  openSpaceFrontMaxM: number;
+  /** Vitesse maximale de variation de la densité d'un cortège qui se tasse ou se relâche (personnes/m² par s). */
+  densityRatePerS: number;
   /** Intervalle entre points de mesure de la largeur praticable le long d'une rue (m). */
   walkWidthSampleEveryM: number;
   /** Trottoir supposé de chaque côté (m) d'une rue ouverte aux véhicules quand aucun bâtiment ne permet de mesurer. */
@@ -127,7 +135,11 @@ export const DEFAULT_SIM_PARAMS: SimParams = {
   speedFactorByClass: { 0: 1.1, 1: 1.05, 2: 1, 3: 0.95, 4: 0.95, 5: 0.9, 6: 0.8, 7: 1, 8: 0.85, 9: 0.75, 10: 0.5, 11: 0.7 },
   crowdAccelMps2: 0.35,
   waitDensity: 3,
-  walkWidthMaxM: 24,
+  walkHalfWidthMaxM: 32,
+  streetHalfWidthM: 12,
+  openSpaceWidthM: 30,
+  openSpaceFrontMaxM: 40,
+  densityRatePerS: 0.05,
   walkWidthSampleEveryM: 10,
   sidewalkAllowanceM: 2.5,
   streetMarginM: 0.8,

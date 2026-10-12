@@ -1,6 +1,8 @@
 import type { StreetGraph } from '../nav/graph';
 import { RouteCursor, locate, type CursorOut, type Located, type Route } from '../nav/route';
+import type { EdgeState } from '../nav/streetState';
 import type { WalkMask } from '../nav/walkMask';
+import { profileFor, profileOfRoute } from './column';
 import type { SimParams } from './params';
 import { noise } from './rng';
 import type { CrowdGroup } from './types';
@@ -17,28 +19,17 @@ export interface MotionCtx {
   graph: StreetGraph;
   params: SimParams;
   mask: WalkMask | null;
-  /** Largeur praticable à pied par arête (m). */
-  walk: Float32Array;
+  /** État des rues (largeur praticable, corridor gauche/droite). */
+  state: EdgeState;
   tick: number;
   tMs: number;
 }
 
 const loc: Located = { x: 0, y: 0, tx: 0, ty: 0, seg: 0 };
 const cur: CursorOut = { x: 0, y: 0, nx: 0, ny: 1, edge: 0, dStart: 0, dEnd: 0 };
-const WIDTH_BLEND_M = 8;
 
 export function columnOffset(i: number, n: number, L: number): number {
   return ((i + 0.5) / n - 0.5) * L;
-}
-
-/** Demi-largeur de front disponible à l'abscisse courante du curseur (largeur de rue lissée aux jonctions). */
-function halfWidth(g: CrowdGroup, c: MotionCtx, route: Route): number {
-  const edges = route.edges;
-  const W = (e: number) => c.walk[edges[e] as number] as number;
-  let w = W(cur.edge);
-  if (cur.dStart < WIDTH_BLEND_M && cur.edge > 0) w = W(cur.edge - 1) + (w - W(cur.edge - 1)) * (0.5 + (0.5 * cur.dStart) / WIDTH_BLEND_M);
-  else if (cur.dEnd < WIDTH_BLEND_M && cur.edge < edges.length - 1) w = W(cur.edge + 1) + (w - W(cur.edge + 1)) * (0.5 + (0.5 * cur.dEnd) / WIDTH_BLEND_M);
-  return Math.max(0.4, Math.min(g.frontWidth, w - 2 * c.params.streetMarginM) / 2);
 }
 
 export interface RouteFrame {
@@ -46,6 +37,8 @@ export interface RouteFrame {
   y: number;
   nx: number;
   ny: number;
+  /** Décalage du centre du corridor (m, côté gauche) et demi-largeur du front à cet endroit. */
+  c: number;
   hw: number;
 }
 
@@ -55,27 +48,33 @@ export interface RouteFrame {
  */
 export function routeFrame(g: CrowdGroup, c: MotionCtx, route: Route, atEnd: boolean): RouteFrame {
   const cursor = new RouteCursor(route);
-  cursor.at(atEnd ? route.length : 0, cur);
-  return { x: cur.x, y: cur.y, nx: cur.nx, ny: cur.ny, hw: halfWidth(g, c, route) };
+  const sAt = atEnd ? route.length : 0;
+  cursor.at(sAt, cur);
+  const prof = route === g.route ? profileFor(g, c.graph, c.state, c.params) : profileOfRoute(route, c.graph, c.state, c.params);
+  const f = prof.frame(sAt);
+  return { x: cur.x, y: cur.y, nx: cur.nx, ny: cur.ny, c: f.c, hw: f.hw };
 }
 
 /** Point d'entrée de l'individu `i` sur le tracé (début ou fin de route), avec son décalage latéral. */
 export function frameEntry(f: RouteFrame, lat: number): { x: number; y: number } {
-  return { x: f.x + f.nx * lat * f.hw, y: f.y + f.ny * lat * f.hw };
+  return { x: f.x + f.nx * (f.c + lat * f.hw), y: f.y + f.ny * (f.c + lat * f.hw) };
 }
 
 function marchTargets(g: CrowdGroup, c: MotionCtx, from: number, to: number): void {
   const m = g.members;
   const route = g.route as NonNullable<CrowdGroup['route']>;
   const n = m.n;
-  const L = g.columnLength;
   const len = route.length;
-  const sc = g.sCentre;
   const lay = g.layout;
   const end = lay ? routeFrame(g, c, route, true) : null;
   const cursor = new RouteCursor(route);
+  const prof = profileFor(g, c.graph, c.state, c.params);
+  // l'aire de la colonne entre la tête et l'individu i vaut (n − i − ½) / densité : chaque individu est placé là où l'espace
+  // praticable LOCAL le permet (la queue garde sa largeur tant qu'elle n'est pas entrée dans la rue étroite)
+  const aHead = prof.area(g.sCentre + g.columnLength / 2);
+  const rho = g.density;
   for (let i = Math.max(from, m.activeStart); i < to; i++) {
-    const s = sc + columnOffset(i, n, L);
+    const s = prof.inverse(aHead - (n - i - 0.5) / rho);
     if (lay && end && s >= len) {
       // prolongement rectiligne depuis le point de sortie de l'individu (SON décalage latéral) jusqu'à son créneau
       const slot = m.slotOf[i] as number;
@@ -89,10 +88,16 @@ function marchTargets(g: CrowdGroup, c: MotionCtx, from: number, to: number): vo
       continue;
     }
     cursor.at(s, cur);
-    const off = (m.lat[i] as number) * halfWidth(g, c, route);
+    const off = prof.lateral(Math.max(0, Math.min(len, s)), m.lat[i] as number);
     m.tx[i] = cur.x + cur.nx * off;
     m.ty[i] = cur.y + cur.ny * off;
   }
+}
+
+/** Abscisse (sur la route du groupe) de l'individu `i` d'une colonne en marche : sert au choix des niveaux par bloc. */
+export function columnS(g: CrowdGroup, c: MotionCtx, i: number): number {
+  const prof = profileFor(g, c.graph, c.state, c.params);
+  return prof.inverse(prof.area(g.sCentre + g.columnLength / 2) - (g.members.n - i - 0.5) / g.density);
 }
 
 function staticTargets(g: CrowdGroup): void {
@@ -130,6 +135,7 @@ function dispersalTargets(g: CrowdGroup, c: MotionCtx): void {
   const len = d.route.length;
   const cursor = new RouteCursor(d.route);
   const start = routeFrame(g, c, d.route, false);
+  const dprof = profileOfRoute(d.route, c.graph, c.state, c.params);
   void ax;
   void ay;
   for (let i = m.activeStart; i < n; i++) {
@@ -150,7 +156,7 @@ function dispersalTargets(g: CrowdGroup, c: MotionCtx): void {
     } else {
       const s = Math.min(walked - dist, len);
       cursor.at(s, cur);
-      const off = (m.lat[i] as number) * halfWidth(g, c, d.route);
+      const off = dprof.lateral(s, m.lat[i] as number);
       m.tx[i] = cur.x + cur.nx * off;
       m.ty[i] = cur.y + cur.ny * off;
     }

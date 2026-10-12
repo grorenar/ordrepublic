@@ -14,14 +14,15 @@ import {
   type StreetCounts,
 } from '../nav/streetState';
 import { WalkMask } from '../nav/walkMask';
-import { computeWalkWidths } from '../nav/walkWidth';
+import { computeWalkCorridors } from '../nav/walkWidth';
 import { EdgeClass } from '../nav/graph';
 import { createLayout, extendLayout, snapToWalkable } from './layout';
 import { levelFor, distanceToFoci, selectBlockLevels, usesBlocks } from './lod';
 import { Journal, pushHistory } from './journal';
 import { MoverSystem, deltaText } from './movers';
 import { concatMembers, createMembers, sliceMembers } from './members';
-import { computeTargets, evaluateNow, frameEntry, goneCount, routeFrame, updateMembers, type MotionCtx } from './motion';
+import { profileFor } from './column';
+import { columnS, computeTargets, evaluateNow, frameEntry, goneCount, routeFrame, updateMembers, type MotionCtx } from './motion';
 import { withParams, type DeepPartial, type SimParams } from './params';
 import { validateSimParams } from './paramDocs';
 import { Rng, hash32 } from './rng';
@@ -127,7 +128,10 @@ export class Sim {
     this.state = createEdgeState(o.graph);
     this.nav = new NavContext(o.graph, this.params.nav, this.state);
     this.mask = o.mask === undefined ? WalkMask.fromGraph(o.graph, this.params.walkMaskResolutionM) : o.mask;
-    this.state.walkWidth.set(computeWalkWidths(o.graph, this.mask, { maxM: this.params.walkWidthMaxM, sampleEveryM: this.params.walkWidthSampleEveryM, sidewalkAllowanceM: this.params.sidewalkAllowanceM }));
+    const cor = computeWalkCorridors(o.graph, this.mask, { maxHalfM: this.params.walkHalfWidthMaxM, streetHalfM: this.params.streetHalfWidthM, sampleEveryM: this.params.walkWidthSampleEveryM, sidewalkAllowanceM: this.params.sidewalkAllowanceM });
+    this.state.walkWidth.set(cor.width);
+    this.state.walkLeft.set(cor.left);
+    this.state.walkRight.set(cor.right);
     this.rng = new Rng(hash32(this.seed, 0xabcdef));
     this.timeline = [...(o.timeline ?? [])].sort((a, b) => a.atMs - b.atMs || (a.id < b.id ? -1 : 1));
     this.zone = o.zone;
@@ -288,7 +292,7 @@ export class Sim {
   }
 
   private motionCtx(): MotionCtx {
-    return { graph: this.graph, params: this.params, mask: this.mask, walk: this.state.walkWidth, tick: this.tick, tMs: this.timeMs };
+    return { graph: this.graph, params: this.params, mask: this.mask, state: this.state, tick: this.tick, tMs: this.timeMs };
   }
 
   /** Réévalue les positions d'un groupe quel que soit son niveau (sélection, affichage d'un groupe en N0). */
@@ -335,6 +339,8 @@ export class Sim {
       sCentre: 0,
       columnLength: 0,
       frontWidth: p.marchFrontWidthMaxM,
+      density: p.marchDensity,
+      profile: null,
       speedMps: 0,
       speedCause: 'à l’arrêt',
       speedOverride: spec.speedMps,
@@ -422,19 +428,31 @@ export class Sim {
     return { route: parts.length === 1 ? (parts[0] as Route) : joinRoutes(parts), waypointS };
   }
 
-  private columnGeometry(g: CrowdGroup, n: number, density = this.params.marchDensity): { width: number; length: number } {
-    const p = this.params;
-    const route = g.route as Route;
-    const L0 = g.columnLength || 1;
-    const s0 = Math.max(0, g.sCentre - L0 / 2);
-    const s1 = Math.min(route.length, g.sCentre + L0 / 2);
-    // un petit groupe forme un bloc compact : largeur de front ≈ √(effectif / densité), bornée
-    let w = Math.max(p.marchFrontWidthMinM, Math.min(p.marchFrontWidthMaxM, Math.sqrt(n / density)));
-    const i0 = edgeIndexAt(route, s0);
-    const i1 = edgeIndexAt(route, s1);
-    for (let i = i0; i <= i1; i++) w = Math.min(w, (this.state.walkWidth[route.edges[i] as number] as number) - 2 * p.streetMarginM);
-    w = Math.max(1, w);
-    return { width: w, length: Math.max(1, n / (density * w)) };
+  /**
+   * Place la colonne sur sa route à partir de l'aire qu'elle occupe (effectif / densité) : la tête et la queue sont déduites de
+   * l'espace praticable de chaque position. `centre` : le centre reste en place ; `head` : la tête reste immobile (colonne
+   * bloquée qui se tasse) ; `gateway` : colonne entièrement derrière le point d'entrée.
+   */
+  private layoutColumn(g: CrowdGroup, anchor: 'centre' | 'head' | 'gateway'): void {
+    const prof = profileFor(g, this.graph, this.state, this.params);
+    const n = g.members.n;
+    const rho = g.density;
+    let head: number;
+    let tail: number;
+    if (anchor === 'gateway') {
+      head = 0;
+      tail = prof.tailFromHead(0, n, rho);
+    } else if (anchor === 'head') {
+      head = g.sCentre + g.columnLength / 2;
+      tail = prof.tailFromHead(head, n, rho);
+    } else {
+      const r = prof.solveFromCentre(g.sCentre, n, rho);
+      head = r.head;
+      tail = r.tail;
+    }
+    g.sCentre = (head + tail) / 2;
+    g.columnLength = Math.max(1, head - tail);
+    g.frontWidth = prof.frontAt(head);
   }
 
   private planMarch(g: CrowdGroup, origin: Vec2, cause: Cause): void {
@@ -451,11 +469,10 @@ export class Sim {
       return;
     }
     g.route = plan.route;
+    g.profile = null;
+    g.density = p.marchDensity;
     g.sCentre = 0;
-    const geo = this.columnGeometry(g, n);
-    g.frontWidth = geo.width;
-    g.columnLength = geo.length;
-    if (g.entry === 'gateway') g.sCentre = -geo.length / 2;
+    this.layoutColumn(g, g.entry === 'gateway' ? 'gateway' : 'centre');
     const dest = g.plan.destination;
     if (dest) {
       locate(g.route, g.route.length, loc);
@@ -547,9 +564,7 @@ export class Sim {
     }
     parent.members = kept;
     if (!isStatic && parent.route) {
-      const geo = this.columnGeometry(parent, kept.n);
-      parent.frontWidth = geo.width;
-      parent.columnLength = geo.length;
+      this.layoutColumn(parent, 'centre');
       parent.settleAtS = Infinity; // recalculé à l'arrivée
     }
     this.applyBlend(parent, fromX, fromY);
@@ -713,20 +728,12 @@ export class Sim {
     }
 
     // géométrie de la colonne (variation bornée : pas de saut de position)
-    const n = g.members.n;
-    if (g.phase === 'moving' && !arriving) {
-      const geo = this.columnGeometry(g, n);
-      g.frontWidth += Math.max(-5 * dt, Math.min(5 * dt, geo.width - g.frontWidth));
-      g.columnLength += Math.max(-p.columnLengthRateMps * dt, Math.min(p.columnLengthRateMps * dt, geo.length - g.columnLength));
-    } else if (g.phase === 'waiting' && !arriving) {
-      // bloqué : la colonne se tasse en bloc contre l'obstacle (densité d'attente, toute la largeur praticable),
-      // la TÊTE restant en place — comme un piquet, pas une file étirée
-      const head = g.sCentre + g.columnLength / 2;
-      const geo = this.columnGeometry(g, n, Math.max(p.waitDensity, p.marchDensity));
-      g.frontWidth += Math.max(-5 * dt, Math.min(5 * dt, geo.width - g.frontWidth));
-      g.columnLength += Math.max(-p.columnLengthRateMps * dt, Math.min(p.columnLengthRateMps * dt, geo.length - g.columnLength));
-      g.sCentre = head - g.columnLength / 2;
-    }
+    // densité : un cortège bloqué se tasse (jusqu'à waitDensity), puis se relâche quand il repart — variation bornée
+    const targetRho = g.phase === 'waiting' ? Math.max(p.waitDensity, p.marchDensity) : p.marchDensity;
+    g.density += Math.max(-p.densityRatePerS * dt, Math.min(p.densityRatePerS * dt, targetRho - g.density));
+    if (g.phase === 'moving' && !arriving) this.layoutColumn(g, 'centre');
+    // bloqué : la TÊTE reste contre l'obstacle, la colonne se tasse derrière — comme un piquet, pas une file étirée
+    else if (g.phase === 'waiting' && !arriving) this.layoutColumn(g, 'head');
 
     // arrivée : la tête atteint la fin de la route ; les individus s'absorbent un à un
     if (arriving && g.settleAtS === Infinity && g.plan.destination) {
@@ -739,7 +746,10 @@ export class Sim {
     const p = this.params;
     const dt = p.tickMs / 1000;
     const v0 = g.speedOverride ?? (g.kind === 'secondary' ? p.speedByKind.secondary : p.speedByKind.march);
-    const widthF = Math.max(p.narrowStreetMinFactor, Math.min(1, g.frontWidth / p.referenceStreetWidthM));
+    // largeur d'espace praticable sous la tête et sous le centre de la colonne
+    const prof = g.profile;
+    const front = prof ? Math.min(prof.frontAt(g.sCentre + g.columnLength / 2), prof.frontAt(g.sCentre)) : g.frontWidth;
+    const widthF = Math.max(p.narrowStreetMinFactor, Math.min(1, front / p.referenceStreetWidthM));
     const cohF = Math.min(1, 0.6 + 0.4 * (g.cohesion / 70)); // pleine vitesse à partir de 70 de cohésion
     const otherF = g.otherCrowdFactor;
     // type de rue : moyenne des facteurs sous le centre et sous la tête de la colonne
@@ -811,11 +821,10 @@ export class Sim {
     const fromY = Float32Array.from(m.y);
     const n = m.n;
     g.route = route;
+    g.profile = null;
+    g.density = this.params.marchDensity;
     g.sCentre = 0;
-    const geo = this.columnGeometry(g, n);
-    g.frontWidth = geo.width;
-    g.columnLength = geo.length;
-    if (g.entry === 'gateway') g.sCentre = -geo.length / 2;
+    this.layoutColumn(g, g.entry === 'gateway' ? 'gateway' : 'centre');
     const dest = g.plan.destination;
     if (dest) {
       locate(route, route.length, loc);
@@ -910,7 +919,7 @@ export class Sim {
       const size = this.size(g);
       if (size <= 0) continue;
       if (g.kind !== 'static' && g.route && g.phase !== 'dispersed') {
-        feet.push({ kind: 'march', route: g.route, centreS: g.sCentre, columnLength: Math.max(1, g.columnLength), size, frontWidth: g.frontWidth });
+        feet.push({ kind: 'march', route: g.route, centreS: g.sCentre, columnLength: Math.max(1, g.columnLength), size, frontWidth: g.frontWidth, ...(g.profile ? { profile: g.profile, density: g.density } : {}) });
         owners.push(g);
       } else if (g.layout) {
         const radius = Math.max(8, g.layout.rMax + 3);
@@ -959,7 +968,7 @@ export class Sim {
     for (const g of this.groups) {
       const pinned = this.pinned.has(g.id);
       if (this.foci && !pinned && usesBlocks(g, lod)) {
-        g.blocks = selectBlockLevels(g, this.foci, lod);
+        g.blocks = selectBlockLevels(g, this.foci, lod, (i) => columnS(g, this.motionCtx(), i));
         let top: SimLevel = 0;
         for (const l of g.blocks.level) if (l > top) top = l as SimLevel;
         g.level = top;

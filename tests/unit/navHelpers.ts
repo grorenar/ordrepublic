@@ -1,5 +1,5 @@
 import type { Vec2 } from '../../src/geo/mercator';
-import { EdgeClass, EdgeFlag, buildGraph, type EdgeClassId, type Obstacle, type RawEdge, type StreetGraph } from '../../src/nav/graph';
+import { EdgeClass, EdgeFlag, buildGraph, type EdgeClassId, type Obstacle, type OpenSpace, type RawEdge, type StreetGraph } from '../../src/nav/graph';
 import { mulberry32 } from '../../src/state/rng';
 
 export interface GridOpts {
@@ -13,6 +13,9 @@ export interface GridOpts {
   oneways?: number;
   seed?: number;
   obstacles?: Obstacle[];
+  spaces?: OpenSpace[];
+  /** Drapeaux supplémentaires par arête (tunnel, pont…), selon les nœuds a et b. */
+  extraFlags?: (a: Vec2, b: Vec2) => number;
   origin?: { lng: number; lat: number };
 }
 
@@ -26,7 +29,7 @@ export function gridGraph(o: GridOpts): StreetGraph {
   const edges: RawEdge[] = [];
   const add = (a: number, b: number) => {
     if (rng() < (o.holes ?? 0)) return;
-    let flags = EdgeFlag.Foot | EdgeFlag.Motor;
+    let flags = EdgeFlag.Foot | EdgeFlag.Motor | (o.extraFlags ? o.extraFlags(nodes[a] as Vec2, nodes[b] as Vec2) : 0);
     if (rng() < (o.oneways ?? 0)) flags |= EdgeFlag.Oneway;
     edges.push({ a, b, shape: [nodes[a] as Vec2, nodes[b] as Vec2], cls: o.cls ?? EdgeClass.Residential, flags, width: o.width ?? 8 });
   };
@@ -34,7 +37,7 @@ export function gridGraph(o: GridOpts): StreetGraph {
     if (r + 1 < o.rows) add(idx(c, r), idx(c, r + 1));
     if (c + 1 < o.cols) add(idx(c, r), idx(c + 1, r));
   }
-  return buildGraph({ origin: o.origin ?? { lng: 6.1757, lat: 49.1193 }, nodes, edges, obstacles: o.obstacles, provenance: { source: 'synthetic' } });
+  return buildGraph({ origin: o.origin ?? { lng: 6.1757, lat: 49.1193 }, nodes, edges, obstacles: o.obstacles, spaces: o.spaces, provenance: { source: 'synthetic' } });
 }
 
 export const nodePos = (g: StreetGraph, n: number): Vec2 => ({ x: g.nodeX[n] as number, y: g.nodeY[n] as number });

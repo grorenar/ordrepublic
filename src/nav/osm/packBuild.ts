@@ -53,6 +53,9 @@ export function overpassQuery(b: Bbox, o: { buildings?: boolean; timeoutS?: numb
     `way["highway"](${bb});`,
     `way["place"="square"](${bb});`,
     `way["leisure"~"^(park|garden|common)$"](${bb});`,
+    // administrations (mairie, tribunal, bâtiments gouvernementaux) : pour placer un piquet devant une vraie administration
+    `way["amenity"~"^(townhall|courthouse)$"](${bb});`,
+    `way["office"="government"](${bb});`,
   ];
   if (o.buildings !== false) parts.push(`way["building"](${bb});`);
   return `[out:json][timeout:${o.timeoutS ?? 90}];\n(\n  ${parts.join('\n  ')}\n);\n(._;>;);\nout body qt;`;

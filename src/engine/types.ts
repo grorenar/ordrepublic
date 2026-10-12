@@ -1,6 +1,7 @@
 import type { LngLat, Vec2 } from '../geo/mercator';
 import type { Provenance } from '../nav/graph';
 import type { Route } from '../nav/route';
+import type { ColumnProfile } from './column';
 
 export type Id = string;
 
@@ -155,6 +156,10 @@ export interface CrowdGroup {
   sCentre: number;
   columnLength: number;
   frontWidth: number;
+  /** Densité courante de la colonne (personnes/m²) : monte quand elle est bloquée, redescend quand elle repart. */
+  density: number;
+  /** Espace praticable le long de la route (largeur locale de chaque position de la colonne). */
+  profile: ColumnProfile | null;
   speedMps: number;
   speedCause: string;
   speedOverride?: number;

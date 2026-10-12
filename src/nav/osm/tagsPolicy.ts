@@ -86,7 +86,9 @@ export function classifyHighway(tags: Tags): HighwayInfo | { excluded: Exclusion
   if (foot) flags |= EdgeFlag.Foot;
   if (motor) flags |= EdgeFlag.Motor;
   if (tags.bridge && tags.bridge !== 'no') flags |= EdgeFlag.Bridge;
-  if (tags.tunnel && tags.tunnel !== 'no') flags |= EdgeFlag.Tunnel;
+  // passage souterrain, passage couvert sous un bâtiment (tunnel=building_passage), voie couverte ou en niveau négatif :
+  // les bâtiments cartographiés au-dessus ne sont pas des murs
+  if ((tags.tunnel && tags.tunnel !== 'no') || tags.covered === 'yes' || Number(tags.layer) < 0) flags |= EdgeFlag.Tunnel;
   let reverse = false;
   const ow = tags.oneway;
   if (ow === 'yes' || ow === '1' || ow === 'true' || tags.junction === 'roundabout') flags |= EdgeFlag.Oneway;
@@ -106,6 +108,18 @@ export function classifySpace(tags: Tags): SpaceKind | null {
   return null;
 }
 
+/** Administration publique (mairie, préfecture, tribunal, bâtiment gouvernemental) d'après les étiquettes OSM. */
+export function isAdministration(tags: Tags): boolean {
+  return (
+    tags.amenity === 'townhall' ||
+    tags.amenity === 'courthouse' ||
+    tags.office === 'government' ||
+    !!tags.government ||
+    tags.building === 'government' ||
+    tags.building === 'civic'
+  );
+}
+
 export function isBuilding(tags: Tags): boolean {
-  return !!tags.building && tags.building !== 'no';
+  return (!!tags.building && tags.building !== 'no') || isAdministration(tags);
 }

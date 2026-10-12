@@ -8,7 +8,7 @@ import {
   type StreetGraph,
 } from '../graph';
 import { parseOverpass, type OsmData } from './parseOverpass';
-import { classifyHighway, classifySpace, isBuilding, type ExclusionReason } from './tagsPolicy';
+import { classifyHighway, classifySpace, isAdministration, isBuilding, type ExclusionReason } from './tagsPolicy';
 
 export interface BuildOptions {
   /** Origine du repère local ; par défaut le centroïde des nœuds utilisés. */
@@ -141,7 +141,7 @@ export function buildGraphFromOsm(data: OsmData, opts: BuildOptions = {}): { gra
     });
     const kind = classifySpace(w.tags);
     if (kind) spaces.push({ id: `osm-w${w.id}`, kind, ring, name: w.tags.name, source: 'osm', osmId: w.id });
-    else if (isBuilding(w.tags)) obstacles.push({ ring, name: w.tags.name, source: 'osm' });
+    else if (isBuilding(w.tags)) obstacles.push({ ring, name: w.tags.name, source: 'osm', ...(isAdministration(w.tags) ? { kind: 'administration' as const } : {}) });
   }
 
   let graph = buildGraph({

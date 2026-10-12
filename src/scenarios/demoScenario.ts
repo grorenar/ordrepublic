@@ -66,19 +66,35 @@ export function buildDemoScenario(graph: StreetGraph, opts: { cortegeSize?: numb
     label: squares[0]?.name ?? (graph.provenance.source === 'osm' ? 'Place principale' : 'Place centrale (fictive)'),
     source: squares[0]?.source ?? 'synthetic',
   };
-  let adminPos = snapPoint({ x: plazaPt.x + 90, y: plazaPt.y + 40 });
-  let adminLabel = 'Administration (fictive)';
-  let adminSource: Anchor['source'] = 'synthetic';
-  const near = graph.obstacles
+  // --- le piquet est placé devant une VRAIE administration (mairie, préfecture, tribunal, bâtiment gouvernemental : étiquettes OSM).
+  // Jamais devant un bâtiment quelconque (un marché couvert n'est pas une administration). Sans administration dans le secteur :
+  // piquet générique, étiqueté comme tel. Sur la ville schématique (fictive) : le bâtiment voisin est une « administration fictive ».
+  const distToPlaza = (c: Vec2) => Math.hypot(c.x - plazaPt.x, c.y - plazaPt.y);
+  const reach = zoneBox ? Math.max(zoneBox.halfWidth, zoneBox.halfHeight) * 0.9 : 600;
+  const candidates = graph.obstacles
     .map((o) => ({ o, c: centroid(o.ring) }))
-    .map((e) => ({ ...e, d: Math.hypot(e.c.x - plazaPt.x, e.c.y - plazaPt.y) }))
-    .filter((e) => e.d >= 50 && e.d <= 250)
-    .sort((a, b) => a.d - b.d);
-  const pick = near.find((e) => e.o.name) ?? near[0];
-  if (pick) {
-    adminPos = snapPoint(pick.c);
-    adminLabel = pick.o.source === 'osm' && pick.o.name ? pick.o.name : 'Administration (fictive)';
-    adminSource = pick.o.source;
+    .map((e) => ({ ...e, d: distToPlaza(e.c) }))
+    .filter((e) => e.d >= 40 && e.d <= reach && (!zoneBox || (Math.abs(e.c.x) <= zoneBox.halfWidth * 0.95 && Math.abs(e.c.y) <= zoneBox.halfHeight * 0.95)));
+  let adminPos = snapPoint({ x: plazaPt.x + 90, y: plazaPt.y + 40 });
+  let adminLabel = 'Point de rassemblement (lieu fictif)';
+  let adminSource: Anchor['source'] = 'synthetic';
+  let adminReal = false;
+  if (graph.provenance.source === 'osm') {
+    const admins = candidates.filter((e) => e.o.kind === 'administration').sort((a, b) => a.d - b.d);
+    const pick = admins[0];
+    if (pick) {
+      adminPos = snapPoint(pick.c);
+      adminLabel = pick.o.name ?? 'Administration';
+      adminSource = 'osm';
+      adminReal = true;
+    }
+  } else {
+    const near = candidates.sort((a, b) => a.d - b.d)[0];
+    if (near) {
+      adminPos = snapPoint(near.c);
+      adminLabel = 'Administration (fictive)';
+      adminReal = true;
+    }
   }
   const admin: Anchor = { id: 'administration', kind: 'place', pos: adminPos, radius: 18, label: adminLabel, source: adminSource };
 
@@ -117,7 +133,7 @@ export function buildDemoScenario(graph: StreetGraph, opts: { cortegeSize?: numb
 
   const ms = (s: number) => Math.round(s * 1000);
   const timeline: ScenarioEvent[] = [
-    { id: 'ev-piquet', atMs: 0, kind: 'spawn_group', reason: `piquet de rassemblement devant ${admin.label} prévu au scénario`, spec: { key: 'piquet', label: 'Piquet devant l’administration', kind: 'static', size: opts.piquetSize ?? 120, origin: admin.pos, anchor: admin, tension: 15 } },
+    { id: 'ev-piquet', atMs: 0, kind: 'spawn_group', reason: adminReal ? `piquet de rassemblement devant ${admin.label} prévu au scénario` : 'piquet de rassemblement prévu au scénario (aucune administration repérée dans le secteur : lieu fictif)', spec: { key: 'piquet', label: adminReal ? `Piquet devant ${admin.label}` : 'Piquet de rassemblement', kind: 'static', size: opts.piquetSize ?? 120, origin: admin.pos, anchor: admin, tension: 15 } },
     {
       id: 'ev-cortege',
       atMs: 0,
@@ -137,7 +153,7 @@ export function buildDemoScenario(graph: StreetGraph, opts: { cortegeSize?: numb
     groupKey: 'cortege',
     count: Math.max(20, Math.round(size * 0.06)),
     child: { label: 'Détachement vers le piquet', destination: admin, onArrival: 'join_target', joinTargetKey: 'piquet', key: 'detachement' },
-    reason: `un groupe se détache du cortège pour rejoindre le piquet devant ${admin.label} (plan du scénario)`,
+    reason: `un groupe se détache du cortège pour rejoindre le piquet (${admin.label}, plan du scénario)`,
   });
   timeline.push({
     id: 'ev-fin',

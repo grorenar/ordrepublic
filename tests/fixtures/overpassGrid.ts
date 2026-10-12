@@ -4,7 +4,7 @@ import { LocalFrame, type LngLat } from '../../src/geo/mercator';
  * Réponse Overpass SIMULÉE (aucun réseau) : quadrillage de rues autour d'un centre, immeubles dans les îlots,
  * une place. Noms fictifs. Sert aux tests du chargement à la demande (unitaires et navigateur).
  */
-export function overpassGrid(center: LngLat, o: { cols?: number; rows?: number; step?: number } = {}) {
+export function overpassGrid(center: LngLat, o: { cols?: number; rows?: number; step?: number; townhall?: boolean; market?: boolean } = {}) {
   const cols = o.cols ?? 12;
   const rows = o.rows ?? 10;
   const step = o.step ?? 90;
@@ -40,7 +40,12 @@ export function overpassGrid(center: LngLat, o: { cols?: number; rows?: number; 
       const key = `b${c}:${r}`;
       const ring = [node(`${key}a`, ax, ay), node(`${key}b`, bx, ay), node(`${key}c`, bx, by), node(`${key}d`, ax, by)];
       const isSquare = c === sc && r === sr;
-      els.push({ type: 'way', id: wid++, nodes: [...ring, ring[0]], tags: isSquare ? { place: 'square', name: 'Place du Test (fictive)' } : { building: 'yes' } });
+      let tags: Record<string, string> = isSquare ? { place: 'square', name: 'Place du Test (fictive)' } : { building: 'yes' };
+      // un marché couvert, proche de la place : bâtiment NOMMÉ qui n'est PAS une administration
+      if (o.market && c === sc + 1 && r === sr) tags = { building: 'yes', amenity: 'marketplace', name: 'Marché couvert (fictif)' };
+      // l'hôtel de ville, plus loin
+      if (o.townhall && c === sc - 2 && r === sr + 2) tags = { building: 'yes', amenity: 'townhall', name: 'Hôtel de Ville (fictif)' };
+      els.push({ type: 'way', id: wid++, nodes: [...ring, ring[0]], tags });
     }
   }
   return { version: 0.6, generator: 'simulation de test', osm3s: { timestamp_osm_base: '2000-01-01T00:00:00Z' }, elements: els };
