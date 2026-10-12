@@ -1,0 +1,72 @@
+# Données OpenStreetMap : générer les paquets de ville (Metz, Paris, Lyon, Marseille)
+
+Le jeu utilise, pour jouer **sur la carte OpenStreetMap**, un **graphe de rues réel** (voies, places, parcs, emprises de bâtiments) préparé **une fois** par ville. Sans paquet, le jeu bascule sur le **fond schématique** (décision D5 : jamais de rues de jeu mal alignées sur la carte).
+
+> **État de vérification** : le script est testé sur une **fixture simulée** (`tests/fixtures/overpass-mini.json`) et par des tests unitaires (aucun accès réseau). **Aucune donnée OSM réelle n'a été téléchargée ni traitée depuis l'environnement de développement** : la procédure ci-dessous est à exécuter sur votre machine ; le rapport produit (§6) permet de contrôler le résultat.
+
+## 1. Dépendances
+- Node.js ≥ 20 et `npm install` dans le dépôt (aucune autre dépendance : pas d'osmium, pas de Python).
+- Un navigateur (méthode A) **ou** un accès Internet pour la commande `--fetch` (méthode B).
+
+## 2. Méthode A — export manuel (recommandée, un téléchargement par ville fait par vous)
+1. Afficher la requête de la ville (aucun accès réseau) :
+   ```bash
+   npm run data:pack -- --city metz --print-query
+   ```
+   La requête est **unique et bornée** : emprise 3,4 × 2,7 km ≈ 9,2 km² autour du centre de la ville (refusée au-delà de 12 km²), voies + places + parcs + bâtiments, sans relations.
+2. Dans un navigateur : ouvrir <https://overpass-turbo.eu>, coller la requête, *Exécuter*, puis **Exporter → données brutes OSM (JSON)** et enregistrer le fichier (ex. `metz.json`).
+3. Générer le paquet :
+   ```bash
+   npm run data:pack -- --city metz --input metz.json
+   ```
+4. Répéter pour `paris`, `lyon`, `marseille` (une ville par appel avec `--input`). Les emprises de Paris/Lyon/Marseille sont denses : le fichier peut atteindre plusieurs dizaines de Mo ; ajouter `--no-buildings` à `--print-query` et à l'import réduit fortement la taille (le rejet des bâtiments par les foules est alors désactivé pour cette ville).
+
+## 3. Méthode B — requête directe (une requête par ville, avec confirmation explicite)
+```bash
+npm run data:pack -- --city all --fetch --confirm-network \
+  --user-agent "OrdrePublic-prive (votre-contact@exemple.org)"
+```
+- **Une seule requête par ville** (4 au total pour `all`), **20 s de pause** entre deux villes (`--delay`), aucune relance automatique. Une réponse 429/504 ignore la ville : réessayez plus tard ou utilisez la méthode A.
+- `--user-agent` est **obligatoire** et doit identifier l'application et un moyen de vous contacter (politique des serveurs publics).
+- L'`--endpoint` par défaut est l'instance publique `https://overpass-api.de/api/interpreter`. D'autres instances publiques existent (listées sur le wiki OSM « Overpass API ») avec **leurs propres conditions** : vérifiez-les avant de les utiliser.
+- La réponse brute est conservée dans `data/osm/raw/<ville>.overpass.json` (ignorée par Git) : relancer `npm run data:pack -- --city metz` **sans option** reconstruit le paquet **hors ligne** depuis ce cache.
+
+## 4. Fichiers produits (dans `public/data/osm/`)
+| Fichier | Contenu |
+|---|---|
+| `<ville>.graph.json` | paquet : graphe, places, bâtiments, noms OSM, provenance, méta (date, emprise, attribution) |
+| `<ville>.graph.json.gz` | même contenu compressé (à servir si votre hébergeur gère `Content-Encoding`) |
+| `<ville>.report.json` | rapport de qualité (§6) |
+| `LICENSE-ODbL.md` | notice de licence et d'attribution |
+
+Le jeu charge `/data/osm/<ville>.graph.json` au lancement. Ces fichiers sont **ignorés par Git** par défaut (voir §5).
+
+## 5. Limites des services et conditions de licence
+**Overpass (service public)** — repères de la documentation OSM (⚠️ à re-vérifier, ils évoluent) : moins de ~10 000 requêtes et ~1 Go par jour comme seuil de non-nuisance ; **diviser par 100 pour un usage régulier** ; identifier l'application (User-Agent/Referer) ; ne pas s'en servir comme infrastructure de production d'une application ; pour un usage soutenu ou commercial, instance dédiée. Ce projet : 1 requête par ville, une fois, avec cache.
+
+**Licence ODbL 1.0** (⚠️ non juridique, à confirmer) :
+- Les paquets sont une **base de données dérivée** d'OpenStreetMap. **Usage personnel/local** : aucune obligation de redistribution.
+- **Redistribution publique** (dépôt public, site hébergé, archive téléchargeable) : le paquet doit rester sous **ODbL**, avec l'attribution « © contributeurs OpenStreetMap » et l'indication des modifications (extraction, filtrage, conversion). C'est pourquoi `public/data/osm/*.graph.json*` est dans `.gitignore` : **ne les commitez que si vous acceptez ces obligations** (et conservez `LICENSE-ODbL.md` à côté).
+- L'**attribution** reste visible dans l'interface quand des données OSM sont utilisées (contrôle d'attribution de la carte).
+- Les **noms** de lieux provenant d'OSM sont affichés tels quels ; les événements (incendies, dommages…) restent fictifs et ne sont jamais présentés comme réels.
+
+**Tuiles de la carte** : indépendantes des paquets (voir README, fournisseurs de fond et leurs conditions).
+
+## 6. Contrôler le résultat
+Le script affiche et écrit un rapport par ville :
+- nombre d'arêtes, de nœuds, kilomètres de voies, places/parcs, bâtiments ;
+- **densité de voirie** (km/km²) : un avertissement apparaît si elle est inférieure à 5 (données OSM incomplètes ou emprise mal placée) ;
+- composantes connexes (seule la plus grande est conservée) ; part de largeurs **estimées par défaut** (largeur OSM absente) ;
+- relations ignorées (multipolygones non gérés : quelques grands bâtiments ou places peuvent manquer) ;
+- exclusions par raison (autoroutes, trottoirs séparés, accès privés…).
+
+Puis, dans le jeu, choisir la ville avec le fond « Carte OpenStreetMap » : **les rues du jeu (blocages, itinéraires) doivent se superposer aux rues de la carte**. Sinon, le paquet est périmé ou l'emprise ne correspond pas : régénérez-le et signalez-le.
+
+## 7. Dépannage
+| Symptôme | Cause probable | Action |
+|---|---|---|
+| `HTTP 429` / `504` | service surchargé ou limite d'usage | attendre, méthode A, ou autre instance (conditions à vérifier) |
+| « aucune voie exploitable » | export vide ou autre zone | refaire l'export avec la requête exacte de `--print-query` |
+| « Emprise … refusée » | `--max-area-km2` dépassé | ne pas augmenter l'emprise ; réduire la zone |
+| fichier très gros / lent | bâtiments de Paris | `--no-buildings` |
+| le jeu reste en fond schématique | paquet absent ou en 404 | vérifier `public/data/osm/<ville>.graph.json` et relancer le serveur |

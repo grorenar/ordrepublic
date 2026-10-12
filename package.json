@@ -11,7 +11,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "bench:engine": "rolldown scripts/bench-engine.ts --file dist-bench/bench.mjs --platform node --format esm && node --expose-gc dist-bench/bench.mjs"
+    "bench:engine": "rolldown scripts/bench-engine.ts --file dist-bench/bench.mjs --platform node --format esm && node --expose-gc dist-bench/bench.mjs",
+    "docs:params": "rolldown scripts/gen-param-docs.ts --file dist-bench/gen-param-docs.mjs --platform node --format esm && node dist-bench/gen-param-docs.mjs",
+    "data:pack": "rolldown scripts/build-city-pack.ts --file dist-bench/build-city-pack.mjs --platform node --format esm && node dist-bench/build-city-pack.mjs"
   },
   "dependencies": {
     "maplibre-gl": "^6.13.0",

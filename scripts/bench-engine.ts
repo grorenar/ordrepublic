@@ -17,6 +17,7 @@ import { createEdgeState } from '../src/nav/streetState';
 import { WalkMask } from '../src/nav/walkMask';
 import type { Anchor, Cause } from '../src/engine/types';
 import { mulberry32 } from '../src/state/rng';
+import { locate, type Located } from '../src/nav/route';
 
 const quick = process.argv.includes('--quick');
 const extended = process.argv.includes('--extended');
@@ -81,6 +82,8 @@ interface Row {
   heapMB: number;
   groupsMs: number;
   membersMs: number;
+  /** Part des individus (%) simulés à chaque niveau en fin de mesure : [N0, N1, N2]. */
+  levels: [number, number, number];
 }
 
 function run(n: number, scenario: Scenario, level: 0 | 1 | 2 | 'mixed'): Row {
@@ -96,7 +99,17 @@ function run(n: number, scenario: Scenario, level: 0 | 1 | 2 | 'mixed'): Row {
   });
   populate(sim, n, scenario);
   const setupMs = performance.now() - ts;
-  if (level === 'mixed') sim.setFoci([{ x: 0, y: 0, radius: 250 }]);
+  // niveau « mixte » : le foyer d'attention (rayon 250 m) suit le centre du premier groupe, comme une caméra qui le suit
+  const loc: Located = { x: 0, y: 0, tx: 0, ty: 0, seg: 0 };
+  const follow = () => {
+    const g = sim.groups[0];
+    if (!g) return;
+    if (g.route && g.kind !== 'static') {
+      locate(g.route, Math.max(0, Math.min(g.route.length, g.sCentre)), loc);
+      sim.setFoci([{ x: loc.x, y: loc.y, radius: 250 }]);
+    } else sim.setFoci([{ x: g.layout?.anchor.x ?? 0, y: g.layout?.anchor.y ?? 0, radius: 250 }]);
+  };
+  if (level === 'mixed') follow();
   let people = 0;
   let arr = 0;
   for (const g of sim.groups) {
@@ -106,20 +119,31 @@ function run(n: number, scenario: Scenario, level: 0 | 1 | 2 | 'mixed'): Row {
   gc?.();
   const mem1 = process.memoryUsage();
   const times: number[] = [];
-  for (let i = 0; i < WARMUP; i++) sim.step();
+  for (let i = 0; i < WARMUP; i++) {
+    if (level === 'mixed') follow();
+    sim.step();
+  }
   sim.profile.groups = sim.profile.members = sim.profile.ticks = 0;
   for (let i = 0; i < TICKS; i++) {
+    if (level === 'mixed') follow();
     const a = performance.now();
     sim.step();
     times.push(performance.now() - a);
   }
   const st = stats(times);
+  const lv: [number, number, number] = [0, 0, 0];
+  for (const g of sim.groups) {
+    if (g.blocks) {
+      for (let b = 0; b < g.blocks.level.length; b++) lv[g.blocks.level[b] as 0 | 1 | 2] += Math.min(g.blocks.size, g.members.n - b * g.blocks.size);
+    } else lv[g.level] += sim.size(g);
+  }
+  const lvPct = lv.map((v) => (100 * v) / n) as [number, number, number];
   const used = mem1.heapUsed + mem1.arrayBuffers - (mem0.heapUsed + mem0.arrayBuffers);
   if (people !== n) throw new Error(`effectif inattendu ${people} ≠ ${n}`);
   return {
     n,
     scenario,
-    level: level === 'mixed' ? 'mixte (foyer 250 m)' : `N${level}`,
+    level: level === 'mixed' ? 'mixte (foyer 250 m suivant le groupe)' : `N${level}`,
     setupMs,
     ...st,
     arrayMB: arr / 1048576,
@@ -127,6 +151,7 @@ function run(n: number, scenario: Scenario, level: 0 | 1 | 2 | 'mixed'): Row {
     heapMB: Math.max(0, used) / 1048576,
     groupsMs: sim.profile.groups / TICKS,
     membersMs: sim.profile.members / TICKS,
+    levels: lvPct,
   };
 }
 
@@ -170,17 +195,17 @@ lines.push(`- Date : ${new Date().toISOString().slice(0, 10)} · Node ${process.
 lines.push(`- Graphe : ville schématique ${graph.edgeCount} arêtes, ${graph.obstacles.length} bâtiments (zone ${HALF_W * 2}×${HALF_H * 2} m) — construction ${Math.round(tGraph)} ms ; masque de marche ${mask.cols}×${mask.rows} (${mb(mask.bytes)} Mo) — rasterisation ${Math.round(tMask)} ms`);
 lines.push(`- Tailles : ${SIZES.join(' / ')} personnes${extended ? ' (mode étendu : recherche des limites au-delà de l\'objectif de 50 000)' : ''}.`);
 lines.push(`- Protocole : graine fixe, ${WARMUP} ticks d'échauffement puis ${TICKS} ticks mesurés (pas de 100 ms de jeu), un seul fil, sans rendu.${quick ? ' **Mode rapide (--quick) : tailles réduites.**' : ''}`);
-lines.push('- Niveaux : **N2** dynamique individuelle (rappel + bruit + rejet des bâtiments) · **N1** positions = cibles analytiques · **N0** rien n\'est mis à jour (positions évaluées à la demande) · **mixte** : foyer d\'attention de 250 m (N2 près, N1/N0 loin).');
+lines.push('- Niveaux : **N2** dynamique individuelle (rappel + bruit + rejet des bâtiments) · **N1** positions = cibles analytiques · **N0** rien n\'est mis à jour (positions évaluées à la demande) · **mixte** : foyer d\'attention de 250 m de rayon qui suit le centre du premier groupe (N2 à moins de 400 m de son bord, N1 jusqu\'à 2,5 km) ; pour un très gros groupe en marche (≥ 4 000), les niveaux sont attribués **par bloc de 256 individus**.');
 lines.push('- Mémoire : « tableaux d\'individus » = taille exacte des tableaux typés (positions, cibles, graines, créneaux, disposition statique) ; « tas JS observé » = variation de `heapUsed + arrayBuffers` autour de la création (indicatif, bruité par le ramasse-miettes). Le masque de marche (grille d\'occupation) est compté à part.');
 lines.push('- « Vitesse max soutenable » = multiple de vitesse de jeu pour lequel le moteur occuperait ≤ 50 % du temps réel (10 ticks de jeu par seconde à 1×) : `50 / tick_moyen_ms`.');
 lines.push('');
 for (const scenario of scenarios) {
   lines.push(`## Scénario « ${scenario} »`);
   lines.push('');
-  lines.push('| Personnes | Niveau | Tick moy. (ms) | p50 | p95 | max | dont groupes / individus (ms) | Mise en place (ms) | Tableaux d’individus (Mo) | Octets/personne | Tas JS observé (Mo, approx.) | Vitesse max soutenable |');
-  lines.push('|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|');
+  lines.push('| Personnes | Niveau | Tick moy. (ms) | p50 | p95 | max | dont groupes / individus (ms) | Mise en place (ms) | Tableaux d’individus (Mo) | Octets/personne | Tas JS observé (Mo, approx.) | Individus N0/N1/N2 (%) | Vitesse max soutenable |');
+  lines.push('|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|');
   for (const r of rows.filter((x) => x.scenario === scenario)) {
-    lines.push(`| ${r.n} | ${r.level} | ${fmt(r.mean)} | ${fmt(r.p50)} | ${fmt(r.p95)} | ${fmt(r.max)} | ${fmt(r.groupsMs)} / ${fmt(r.membersMs)} | ${Math.round(r.setupMs)} | ${r.arrayMB.toFixed(1)} | ${Math.round(r.bytesPerPerson)} | ${r.heapMB.toFixed(1)} | ×${(50 / Math.max(r.mean, 0.001)).toFixed(0)} |`);
+    lines.push(`| ${r.n} | ${r.level} | ${fmt(r.mean)} | ${fmt(r.p50)} | ${fmt(r.p95)} | ${fmt(r.max)} | ${fmt(r.groupsMs)} / ${fmt(r.membersMs)} | ${Math.round(r.setupMs)} | ${r.arrayMB.toFixed(1)} | ${Math.round(r.bytesPerPerson)} | ${r.heapMB.toFixed(1)} | ${r.levels.map((v) => Math.round(v)).join('/')} | ×${(50 / Math.max(r.mean, 0.001)).toFixed(0)} |`);
   }
   lines.push('');
 }

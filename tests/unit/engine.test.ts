@@ -373,10 +373,10 @@ describe('états de rue produits par la simulation', () => {
   });
 
   it('un cortège ralentit s’il traverse une rue occupée par une autre foule', () => {
-    const graph = gridGraph({ cols: 8, rows: 1, spacing: 100, width: 10 });
+    const graph = gridGraph({ cols: 8, rows: 1, spacing: 100, width: 30 });
     const run = (withCrowd: boolean) => {
       const sim = new Sim({ graph, seed: 1, mask: null });
-      if (withCrowd) sim.createGroup({ label: 'Autre foule', kind: 'static', size: 1500, origin: { x: 100, y: 0 }, anchor: anchorAt({ x: 100, y: 0 }) }, PLAN);
+      if (withCrowd) sim.createGroup({ label: 'Autre foule', kind: 'static', size: 1000, origin: { x: 100, y: 0 }, anchor: anchorAt({ x: 100, y: 0 }) }, PLAN);
       const g = sim.group(sim.createGroup({ label: 'c', kind: 'march', size: 300, origin: { x: -340, y: 0 }, plan: { destination: anchorAt({ x: 340, y: 0 }), waypoints: [], onArrival: 'settle', patienceMs: 0 } }, PLAN))!;
       let minSpeed = Infinity;
       for (let i = 0; i < 4500; i++) {
@@ -388,6 +388,17 @@ describe('états de rue produits par la simulation', () => {
     const free = run(false);
     const crowded = run(true);
     expect(crowded.minSpeed).toBeLessThan(free.minSpeed);
+  });
+
+  it('une foule dense qui remplit la rue unique bloque le passage : le cortège attend ; aucun passage forcé', () => {
+    const graph = gridGraph({ cols: 8, rows: 1, spacing: 100, width: 10 });
+    const sim = new Sim({ graph, seed: 1, mask: null });
+    sim.createGroup({ label: 'Barrage humain', kind: 'static', size: 3000, origin: { x: 100, y: 0 }, anchor: anchorAt({ x: 100, y: 0 }) }, PLAN);
+    const g = sim.group(sim.createGroup({ label: 'c', kind: 'march', size: 300, origin: { x: -340, y: 0 }, plan: { destination: anchorAt({ x: 340, y: 0 }), waypoints: [], onArrival: 'settle', patienceMs: 0 } }, PLAN))!;
+    sim.run(6000);
+    expect(g.phase).toBe('waiting');
+    expect(sim.journal.byCode('group.waiting')[0]!.why.kind).toBe('rule');
+    expect(sim.streetCounts().blocked).toBeGreaterThan(0);
   });
 });
 

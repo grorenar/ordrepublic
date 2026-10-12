@@ -4,3 +4,8 @@ test-results
 playwright-report
 *.local
 dist-bench
+# Paquets OSM générés (base de données dérivée ODbL : à ne versionner que si vous acceptez ses obligations de redistribution)
+public/data/osm/*.graph.json
+public/data/osm/*.graph.json.gz
+public/data/osm/*.report.json
+data/osm/raw/

@@ -1,5 +1,5 @@
 import type { Vec2 } from '../geo/mercator';
-import { NavContext } from '../nav/astar';
+import { NavContext, type SoftZone } from '../nav/astar';
 import type { StreetGraph } from '../nav/graph';
 import { edgeIndexAt, joinRoutes, locate, truncateRoute, type Located, type Route } from '../nav/route';
 import { projectOnEdge } from '../nav/spatialGrid';
@@ -15,21 +15,43 @@ import {
 } from '../nav/streetState';
 import { WalkMask } from '../nav/walkMask';
 import { createLayout, extendLayout, snapToWalkable } from './layout';
+import { levelFor, distanceToFoci, selectBlockLevels, usesBlocks } from './lod';
 import { Journal, pushHistory } from './journal';
+import { MoverSystem } from './movers';
 import { concatMembers, createMembers, sliceMembers } from './members';
 import { computeTargets, evaluateNow, frameEntry, goneCount, routeFrame, updateMembers, type MotionCtx } from './motion';
 import { withParams, type DeepPartial, type SimParams } from './params';
+import { validateSimParams } from './paramDocs';
 import { Rng, hash32 } from './rng';
-import type { Anchor, Cause, CrowdGroup, Focus, GroupPlan, GroupSpec, Id, LogEvent, MemberSet, SimLevel } from './types';
+import type {
+  Anchor,
+  Cause,
+  CrowdGroup,
+  Focus,
+  GroupPlan,
+  GroupSpec,
+  Id,
+  LogEvent,
+  MemberSet,
+  MoverEntity,
+  OrderRequest,
+  OrderResult,
+  SimLevel,
+  UnitEntity,
+  UnitSpec,
+  VehicleEntity,
+  VehicleSpec,
+} from './types';
 
 export class CausalityError extends Error {}
+export class ParamError extends Error {}
 
 /** Événement de scénario daté ; `reason` est repris tel quel dans le journal. */
 export type ScenarioEvent =
   | { id: Id; atMs: number; kind: 'spawn_group'; spec: GroupSpec & { key?: string }; reason: string }
   | { id: Id; atMs: number; kind: 'close_street'; edgeId: number; reason: string }
   | { id: Id; atMs: number; kind: 'open_street'; edgeId: number; reason: string }
-  | { id: Id; atMs: number; kind: 'begin_dispersal'; groupKey: string; exit: Anchor; durationMs: number; reason: string }
+  | { id: Id; atMs: number; kind: 'begin_dispersal'; groupKey: string; exit: Anchor; durationMs: number; reason: string; /** Attend que le groupe soit installé (sinon l'événement est réessayé à chaque tick). */ whenSettled?: boolean }
   | { id: Id; atMs: number; kind: 'split_group'; groupKey: string; count: number; child: SplitChild; reason: string };
 
 export interface SplitChild {
@@ -65,13 +87,26 @@ export class Sim {
   readonly nav: NavContext;
   readonly state: EdgeState;
   readonly mask: WalkMask | null;
+  /** Avertissements de cohérence des paramètres (non bloquants), à afficher dans les réglages/diagnostics. */
+  readonly paramWarnings: string[];
   readonly journal = new Journal();
   readonly groups: CrowdGroup[] = [];
+  readonly units: UnitEntity[] = [];
+  readonly vehicles: VehicleEntity[] = [];
+  /** Résultats des ordres traités au dernier tick (lus par l'interface). */
+  lastOrderResults: OrderResult[] = [];
+  private readonly movers: MoverSystem;
+  private readonly moverById = new Map<Id, MoverEntity>();
+  private pending: OrderRequest[] = [];
+  private orderCounter = 0;
+  private unitCounter = 0;
+  private vehicleCounter = 0;
   readonly seed: number;
   readonly rng: Rng;
   tick = 0;
   private counter = 0;
   private timeline: ScenarioEvent[];
+  private deferred: ScenarioEvent[] = [];
   private nextEvent = 0;
   private keyToId = new Map<string, Id>();
   private closedBy = new Map<number, Cause>();
@@ -85,12 +120,105 @@ export class Sim {
     this.graph = o.graph;
     this.seed = o.seed >>> 0;
     this.params = withParams(o.params);
+    const issues = validateSimParams(this.params);
+    if (issues.errors.length) throw new ParamError(`Paramètres de simulation incohérents :\n- ${issues.errors.join('\n- ')}`);
     this.state = createEdgeState(o.graph);
     this.nav = new NavContext(o.graph, this.params.nav, this.state);
     this.mask = o.mask === undefined ? WalkMask.fromGraph(o.graph, this.params.walkMaskResolutionM) : o.mask;
     this.rng = new Rng(hash32(this.seed, 0xabcdef));
     this.timeline = [...(o.timeline ?? [])].sort((a, b) => a.atMs - b.atMs || (a.id < b.id ? -1 : 1));
     this.zone = o.zone;
+    this.paramWarnings = issues.warnings;
+    this.movers = new MoverSystem({
+      graph: this.graph,
+      nav: this.nav,
+      state: this.state,
+      params: this.params,
+      timeMs: () => this.timeMs,
+      tick: () => this.tick,
+      log: (level, code, text, why, subject, data) => this.log(level, code, text, why, subject, data),
+      closeCause: (e) => this.closedBy.get(e),
+      nextOrderId: () => `O-${++this.orderCounter}`,
+    });
+  }
+
+  // ------------------------------------------------------------------ unités et véhicules
+
+  private requireCause(cause: Cause): void {
+    if (!cause || !cause.kind || !cause.refId || !cause.note) throw new CausalityError('Création sans cause identifiable.');
+  }
+
+  private baseMover(mode: 'foot' | 'vehicle', pos: Vec2, heading: number) {
+    const placed = this.movers.placeOnGraph(pos, mode);
+    if (!placed) throw new RangeError('Position hors du réseau de rues : impossible de placer l’entité.');
+    return {
+      mode,
+      x: placed.x,
+      y: placed.y,
+      px: placed.x,
+      py: placed.y,
+      heading,
+      prevHeading: heading,
+      speedMps: 0,
+      route: null,
+      routeS: 0,
+      status: 'idle' as const,
+      order: null,
+      waitingSinceMs: null,
+      lastRouteStateVersion: this.state.version,
+      lastRetryTick: this.tick,
+    };
+  }
+
+  /** Ajoute une unité de forces de l'ordre (identifiant fictif stable fourni par le scénario). */
+  addUnit(spec: UnitSpec, cause: Cause): Id {
+    this.requireCause(cause);
+    const id = `U-${++this.unitCounter}`;
+    const force = spec.force;
+    const e: UnitEntity = {
+      ...this.baseMover('foot', spec.pos, spec.heading ?? 0),
+      id,
+      entity: 'unit',
+      force,
+      loadout: { shield: force === 'crs' || force === 'gendarmerie_mobile', helmet: true, ...spec.loadout },
+      callsign: spec.callsign,
+      num: spec.num,
+      headcount: spec.headcount,
+    };
+    this.units.push(e);
+    this.moverById.set(id, e);
+    this.log('info', 'unit.created', `${e.callsign} : ${e.headcount} agents en position.`, cause, { type: 'unit', id });
+    return id;
+  }
+
+  addVehicle(spec: VehicleSpec, cause: Cause): Id {
+    this.requireCause(cause);
+    const id = `V-${++this.vehicleCounter}`;
+    const e: VehicleEntity = { ...this.baseMover('vehicle', spec.pos, spec.heading ?? 0), id, entity: 'vehicle', vehicle: spec.vehicle, callsign: spec.callsign, crew: spec.crew };
+    this.vehicles.push(e);
+    this.moverById.set(id, e);
+    this.log('info', 'unit.created', `${e.callsign} : véhicule en position.`, cause, { type: 'vehicle', id });
+    return id;
+  }
+
+  entity(id: Id): MoverEntity | undefined {
+    return this.moverById.get(id);
+  }
+
+  /** Met un ordre en file : il sera exécuté au prochain tick (utilisable en pause). */
+  enqueue(req: OrderRequest): void {
+    this.pending.push(req);
+  }
+
+  /** Exécute immédiatement un ordre (ordres simultanés sur plusieurs entités). */
+  issueOrder(req: OrderRequest): OrderResult[] {
+    return this.movers.apply(req, this.moverById);
+  }
+
+  /** Itinéraire d'aperçu d'un ordre, sans modifier l'état. */
+  previewOrder(id: Id, target: Vec2) {
+    const e = this.moverById.get(id);
+    return e ? this.movers.preview(e, target) : null;
   }
 
   get timeMs(): number {
@@ -146,6 +274,11 @@ export class Sim {
     return countStreetStates(this.graph, this.state, this.zone);
   }
 
+  /** Zone de jeu (demi-côtés en mètres) utilisée pour le compteur de rues bloquées. */
+  setZone(zone: { halfWidth: number; halfHeight: number } | undefined): void {
+    this.zone = zone;
+  }
+
   setFoci(foci: Focus[] | null, pinned: Iterable<Id> = []): void {
     this.foci = foci;
     this.pinned = new Set(pinned);
@@ -171,7 +304,7 @@ export class Sim {
     if (!Number.isInteger(spec.size) || spec.size < 1) throw new RangeError('Effectif de groupe invalide.');
     const counter = this.counter + 1;
     const seed = spec.seed ?? hash32(this.seed, counter);
-    return this.finishCreate(spec, cause, createMembers(spec.size, seed, this.params.subgroupSize), seed, false);
+    return this.finishCreate(spec, cause, createMembers(spec.size, seed), seed, false);
   }
 
   /** Construit le groupe autour d'un ensemble d'individus (neuf ou issu d'une scission). */
@@ -212,6 +345,7 @@ export class Sim {
       settleAtS: Infinity,
       dispersal: null,
       level: p.lod.defaultLevel,
+      blocks: null,
       needsSnap: true,
       blend: null,
     };
@@ -260,6 +394,12 @@ export class Sim {
 
   // ------------------------------------------------------------------ planification
 
+  /** Zone d'arrivée d'un groupe : on peut y traverser une foule dense pour rejoindre le lieu de destination. */
+  private softZone(plan: GroupPlan): SoftZone | undefined {
+    const d = plan.destination;
+    return d ? { x: d.pos.x, y: d.pos.y, r: d.radius + this.params.arrivalZoneM } : undefined;
+  }
+
   private planRoute(from: Vec2, plan: GroupPlan): { route: Route; waypointS: number[] } | null {
     const targets: Vec2[] = [...plan.waypoints.map((w) => w.pos)];
     if (plan.destination) targets.push(plan.destination.pos);
@@ -269,7 +409,7 @@ export class Sim {
     let cur = from;
     let acc = 0;
     for (const t of targets) {
-      const r = this.nav.findRoute(cur, t, 'crowd');
+      const r = this.nav.findRoute(cur, t, 'crowd', { soft: this.softZone(plan) });
       if (!r) return null;
       parts.push(r);
       acc += r.length;
@@ -285,12 +425,13 @@ export class Sim {
     const L0 = g.columnLength || 1;
     const s0 = Math.max(0, g.sCentre - L0 / 2);
     const s1 = Math.min(route.length, g.sCentre + L0 / 2);
-    let w = p.marchFrontWidthMaxM;
+    // un petit groupe forme un bloc compact : largeur de front ≈ √(effectif / densité), bornée
+    let w = Math.max(p.marchFrontWidthMinM, Math.min(p.marchFrontWidthMaxM, Math.sqrt(n / p.marchDensity)));
     const i0 = edgeIndexAt(route, s0);
     const i1 = edgeIndexAt(route, s1);
     for (let i = i0; i <= i1; i++) w = Math.min(w, (this.graph.edgeWidth[route.edges[i] as number] as number) - 2 * p.streetMarginM);
     w = Math.max(1, w);
-    return { width: w, length: n / (p.marchDensity * w) };
+    return { width: w, length: Math.max(1, n / (p.marchDensity * w)) };
   }
 
   private planMarch(g: CrowdGroup, origin: Vec2, cause: Cause): void {
@@ -447,10 +588,17 @@ export class Sim {
   step(): void {
     const t0 = performance.now();
     this.tick++;
+    if (this.pending.length) {
+      this.lastOrderResults = [];
+      for (const req of this.pending) this.lastOrderResults.push(...this.movers.apply(req, this.moverById));
+      this.pending = [];
+    }
     this.runTimeline();
     const tG = performance.now();
     for (const g of this.groups) this.updateGroup(g);
     if (this.tick % this.params.streetStateEveryTicks === 0) this.updateStreetStates();
+    for (const u of this.units) this.movers.step(u);
+    for (const v of this.vehicles) this.movers.step(v);
     const tS = performance.now();
     this.chooseLevels();
     const ctx = this.motionCtx();
@@ -470,6 +618,16 @@ export class Sim {
 
   private runTimeline(): void {
     const t = this.timeMs;
+    if (this.deferred.length) {
+      const still: ScenarioEvent[] = [];
+      for (const ev of this.deferred) {
+        if (ev.kind !== 'begin_dispersal') continue;
+        const g = this.groupByKey(ev.groupKey);
+        if (g && g.phase === 'settled') this.beginDispersal(g.id, ev.exit, ev.durationMs, { kind: 'scenario_event', refId: ev.id, note: ev.reason });
+        else if (g && g.phase !== 'dispersed' && g.phase !== 'dispersing') still.push(ev);
+      }
+      this.deferred = still;
+    }
     while (this.nextEvent < this.timeline.length && (this.timeline[this.nextEvent] as ScenarioEvent).atMs <= t) {
       const ev = this.timeline[this.nextEvent++] as ScenarioEvent;
       const cause: Cause = { kind: 'scenario_event', refId: ev.id, note: ev.reason };
@@ -485,7 +643,8 @@ export class Sim {
           break;
         case 'begin_dispersal': {
           const g = this.groupByKey(ev.groupKey);
-          if (g) this.beginDispersal(g.id, ev.exit, ev.durationMs, cause);
+          if (g && (!ev.whenSettled || g.phase === 'settled')) this.beginDispersal(g.id, ev.exit, ev.durationMs, cause);
+          else if (ev.whenSettled) this.deferred.push(ev);
           break;
         }
         case 'split_group': {
@@ -645,7 +804,7 @@ export class Sim {
     g.lastRouteStateVersion = this.state.version;
     const headS = Math.min(route.length, g.sCentre + g.columnLength / 2);
     const ei = edgeIndexAt(route, headS);
-    const blockedIdx = this.nav.firstBlockedEdge(route, ei + 1);
+    const blockedIdx = this.nav.firstBlockedEdge(route, ei + 1, this.softZone(g.plan));
     if (blockedIdx < 0) {
       if (g.phase === 'waiting') {
         g.phase = 'moving';
@@ -674,7 +833,7 @@ export class Sim {
     let cur = headPt;
     let ok = true;
     for (let k = 0; k < legs.length; k++) {
-      const r = this.nav.findRoute(cur, legs[k] as Vec2, 'crowd', k === 0 ? { start: { edge: headEdge, t: proj.t, toward } } : {});
+      const r = this.nav.findRoute(cur, legs[k] as Vec2, 'crowd', k === 0 ? { start: { edge: headEdge, t: proj.t, toward }, soft: this.softZone(g.plan) } : { soft: this.softZone(g.plan) });
       if (!r) {
         ok = false;
         break;
@@ -720,16 +879,16 @@ export class Sim {
       const size = this.size(g);
       if (size <= 0) continue;
       if (g.kind !== 'static' && g.route && g.phase !== 'dispersed') {
-        feet.push({ kind: 'march', route: g.route, centreS: g.sCentre, columnLength: Math.max(1, g.columnLength), size });
+        feet.push({ kind: 'march', route: g.route, centreS: g.sCentre, columnLength: Math.max(1, g.columnLength), size, frontWidth: g.frontWidth });
         owners.push(g);
       } else if (g.layout) {
         const radius = Math.max(8, g.layout.rMax + 3);
-        feet.push({ kind: 'static', center: g.layout.anchor, radius, size });
+        feet.push({ kind: 'static', center: g.layout.anchor, radius, size, density: g.layout.density });
         owners.push(g);
       }
     }
     const own: Array<Map<number, number>> = feet.map(() => new Map());
-    accumulateLoads(this.graph, this.nav.grid, feet, this.state.load, (fi, e, l) => {
+    accumulateLoads(this.graph, this.nav.grid, feet, this.state, this.params.nav, (fi, e, l) => {
       const m = own[fi] as Map<number, number>;
       m.set(e, (m.get(e) ?? 0) + l);
     });
@@ -754,7 +913,8 @@ export class Sim {
         const e = route.edges[i] as number;
         const other = (this.state.load[e] as number) - (mine.get(e) ?? 0);
         if (other <= 0) continue;
-        const rho = other / Math.max(1e-6, (this.graph.edgeLen[e] as number) * (this.graph.edgeWidth[e] as number));
+        const pres = (this.state.presence[e] as number) > 0 ? Math.max(1, this.state.presence[e] as number) : (this.graph.edgeLen[e] as number);
+        const rho = other / Math.max(1e-6, pres * (this.graph.edgeWidth[e] as number));
         factor = Math.min(factor, Math.max(p.minSpeedFactor, Math.min(1, 1 - rho / p.jamDensity)));
       }
       g.otherCrowdFactor = factor;
@@ -766,16 +926,28 @@ export class Sim {
   private chooseLevels(): void {
     const lod = this.params.lod;
     for (const g of this.groups) {
+      const pinned = this.pinned.has(g.id);
+      if (this.foci && !pinned && usesBlocks(g, lod)) {
+        g.blocks = selectBlockLevels(g, this.foci, lod);
+        let top: SimLevel = 0;
+        for (const l of g.blocks.level) if (l > top) top = l as SimLevel;
+        g.level = top;
+        continue;
+      }
+      if (g.blocks) {
+        // retour à un niveau unique : les blocs restés en N0 doivent être réalignés sur leurs cibles
+        if (g.blocks.stale.some((v) => v === 1)) g.needsSnap = true;
+        g.blocks = null;
+      }
       let level: SimLevel = lod.defaultLevel;
-      if (this.foci && !this.pinned.has(g.id)) {
+      if (pinned) level = 2;
+      else if (this.foci) {
         const c = this.groupCentre(g);
         if (c) {
           const radius = g.kind !== 'static' && g.route ? g.columnLength / 2 + 10 : (g.layout?.rMax ?? 10) + 5;
-          let best = Infinity;
-          for (const f of this.foci) best = Math.min(best, Math.hypot(c.x - f.x, c.y - f.y) - radius - f.radius);
-          level = best <= lod.n2RadiusM ? 2 : best <= lod.n1RadiusM ? 1 : 0;
+          level = levelFor(distanceToFoci(c.x, c.y, this.foci) - radius, lod, g.level);
         }
-      } else if (this.pinned.has(g.id)) level = 2;
+      }
       if (level !== g.level) {
         if (g.level === 0) g.needsSnap = true;
         g.level = level;
@@ -805,6 +977,11 @@ export class Sim {
         mix(Math.round((m.x[i] as number) * 100));
         mix(Math.round((m.y[i] as number) * 100));
       }
+    }
+    for (const e of [...this.units, ...this.vehicles]) {
+      mix(Math.round(e.x * 100));
+      mix(Math.round(e.y * 100));
+      mix(Math.round(e.heading * 1000));
     }
     mix(this.journal.count);
     mix(this.state.version);

@@ -12,6 +12,10 @@ export type StreetStateId = 0 | 1 | 2 | 3;
 
 export interface EdgeState {
   scenarioBlock: Uint8Array;
+  /** Longueur maximale (m) de l'arête couverte par une foule (0 = aucune information : on suppose toute la longueur). */
+  presence: Float32Array;
+  /** Largeur (m) de la section de rue occupée par les foules présentes (0 = aucune information). */
+  section: Float32Array;
   load: Float32Array;
   density: Float32Array;
   occupiedWidth: Float32Array;
@@ -29,6 +33,8 @@ export function createEdgeState(g: StreetGraph): EdgeState {
   const n = g.edgeCount;
   return {
     scenarioBlock: new Uint8Array(n),
+    presence: new Float32Array(n),
+    section: new Float32Array(n),
     load: new Float32Array(n),
     density: new Float32Array(n),
     occupiedWidth: new Float32Array(n),
@@ -41,8 +47,8 @@ export function createEdgeState(g: StreetGraph): EdgeState {
 
 /** Emprise d'une foule pour le calcul de charge. */
 export type CrowdFootprint =
-  | { kind: 'march'; route: Route; centreS: number; columnLength: number; size: number }
-  | { kind: 'static'; center: Vec2; radius: number; size: number };
+  | { kind: 'march'; route: Route; centreS: number; columnLength: number; size: number; frontWidth: number }
+  | { kind: 'static'; center: Vec2; radius: number; size: number; density: number };
 
 /** Longueur (m) du segment [a,b] située dans le disque (c, r). */
 export function segmentLengthInCircle(ax: number, ay: number, bx: number, by: number, cx: number, cy: number, r: number): number {
@@ -83,16 +89,36 @@ function polygonAreaInDiscApprox(ring: Float32Array, cx: number, cy: number, r: 
   return d <= r ? Math.min(area, Math.PI * r * r) : 0;
 }
 
-/** Répartit l'effectif des empreintes sur les arêtes (calcul par GROUPE, pas par individu). */
+/** Tampons remplis par `accumulateLoads` (un jeu par recalcul). */
+export interface LoadAccum {
+  load: Float32Array;
+  presence: Float32Array;
+  section: Float32Array;
+}
+
+/**
+ * Répartit l'effectif des empreintes sur les arêtes (calcul par GROUPE, pas par individu) et déduit, pour chaque
+ * arête, la longueur couverte (`presence`) et la largeur de la section occupée (`section`) : un véhicule est arrêté
+ * par la section la plus occupée, pas par une occupation moyenne sur toute la longueur de l'arête.
+ */
 export function accumulateLoads(
   g: StreetGraph,
   grid: EdgeGrid,
   foot: readonly CrowdFootprint[],
-  out: Float32Array,
+  out: LoadAccum,
+  p: Pick<NavParams, 'referenceDensity' | 'minPresenceM'>,
   /** Reçoit la contribution de chaque empreinte (indice, arête, personnes) : sert à exclure la charge « propre » d'un groupe. */
   onPart?: (footprint: number, edge: number, load: number) => void,
 ): void {
-  out.fill(0);
+  out.load.fill(0);
+  out.presence.fill(0);
+  out.section.fill(0);
+  const add = (fi: number, e: number, load: number, presence: number, sectionW: number) => {
+    out.load[e]! += load;
+    if (presence > (out.presence[e] as number)) out.presence[e] = presence;
+    if (presence >= p.minPresenceM) out.section[e]! += Math.min(g.edgeWidth[e] as number, sectionW);
+    onPart?.(fi, e, load);
+  };
   for (let fi = 0; fi < foot.length; fi++) {
     const f = foot[fi] as CrowdFootprint;
     if (f.size <= 0) continue;
@@ -106,14 +132,11 @@ export function accumulateLoads(
         const a = f.route.edgeStart[i] as number;
         const b = f.route.edgeStart[i + 1] as number;
         const ov = Math.min(b, s1) - Math.max(a, s0);
-        if (ov > 0) {
-          out[f.route.edges[i] as number]! += perMeter * ov;
-          onPart?.(fi, f.route.edges[i] as number, perMeter * ov);
-        }
+        if (ov > 0) add(fi, f.route.edges[i] as number, perMeter * ov, ov, f.frontWidth);
       }
     } else {
       const edges = grid.edgesInDisc(f.center, f.radius + 5);
-      const parts: Array<[number, number]> = [];
+      const parts: Array<[number, number, number]> = [];
       let total = 0;
       for (const e of edges) {
         let inside = 0;
@@ -122,43 +145,51 @@ export function accumulateLoads(
         }
         if (inside <= 0) continue;
         const area = inside * (g.edgeWidth[e] as number);
-        parts.push([e, area]);
+        parts.push([e, area, inside]);
         total += area;
       }
       let spaceArea = 0;
       for (const sp of g.spaces) spaceArea += polygonAreaInDiscApprox(sp.ring, f.center.x, f.center.y, f.radius);
       total += spaceArea;
       if (total <= 0) continue;
-      for (const [e, area] of parts) {
-        out[e]! += (f.size * area) / total;
-        onPart?.(fi, e, (f.size * area) / total);
+      // largeur de la section = surface occupée par les personnes présentes sur l'arête / longueur couverte
+      for (const [e, area, inside] of parts) {
+        const share = (f.size * area) / total;
+        add(fi, e, share, inside, share / (inside * f.density));
       }
     }
   }
 }
 
-/** Dérive densité, largeur occupée, états et facteur de vitesse. Retourne vrai si un état a changé. */
+/**
+ * Dérive densité locale, largeur occupée, états et facteur de vitesse. Critères (tous configurables) :
+ *  - véhicule : bloqué si une section occupée laisse moins de `vehicleMinFreeWidthM` (plafonné à la largeur de la rue) ;
+ *  - piéton : bloqué à saturation (`jamDensity`) OU si la largeur libre est inférieure à `footMinWidthM` alors que la
+ *    densité atteint `footBlockMinDensity` ;
+ *  - partiellement obstruée si la section occupe au moins `partialObstruction` de la largeur ; ralentie dès `slowedDensity`.
+ * Retourne vrai si un état a changé.
+ */
 export function deriveStates(g: StreetGraph, st: EdgeState, p: NavParams): boolean {
   let changed = false;
-  const needVeh = p.vehicleWidthM + p.vehicleMarginM;
   for (let e = 0; e < g.edgeCount; e++) {
     const len = g.edgeLen[e] as number;
     const W = g.edgeWidth[e] as number;
     const n = st.load[e] as number;
-    const rho = n / Math.max(1e-6, len * W);
-    const occ = Math.min(W, n / Math.max(1e-6, len * p.referenceDensity));
+    const informed = (st.presence[e] as number) > 0;
+    const pres = informed ? Math.max(1, st.presence[e] as number) : len;
+    const rho = n / Math.max(1e-6, pres * W);
+    const occ = informed ? Math.min(W, st.section[e] as number) : Math.min(W, n / Math.max(1e-6, len * p.referenceDensity));
     const free = W - occ;
     st.density[e] = rho;
     st.occupiedWidth[e] = occ;
 
     let foot: StreetStateId = 0;
-    if (rho >= p.jamDensity) foot = 3; // un piéton traverse une foule dense lentement ; il ne bloque qu'à saturation
+    if (rho >= p.jamDensity || (n > 0 && free < Math.min(p.footMinWidthM, W) && rho >= p.footBlockMinDensity)) foot = 3;
     else if (occ / W >= p.partialObstruction) foot = 2;
     else if (rho >= p.slowedDensity) foot = 1;
 
     let veh: StreetStateId = 0;
-    const need = Math.min(needVeh, W);
-    if (occ > 0.05 && free < need) veh = 3;
+    if (occ > 0.05 && free < Math.min(p.vehicleMinFreeWidthM, W)) veh = 3;
     else if (occ / W >= p.partialObstruction) veh = 2;
     else if (rho >= p.slowedDensity) veh = 1;
 

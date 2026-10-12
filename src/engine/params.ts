@@ -22,6 +22,10 @@ export interface SimParams {
   staticDensity: number;
   /** Largeur maximale du front d'un cortège (m). */
   marchFrontWidthMaxM: number;
+  /** Largeur minimale du front d'un cortège (m) : un petit groupe forme un bloc compact, pas un front de 14 m. */
+  marchFrontWidthMinM: number;
+  /** Rayon (m) autour de la destination dans lequel un groupe peut traverser une foule dense pour la rejoindre. */
+  arrivalZoneM: number;
   /** Marge entre le cortège et le bord de la rue (m). */
   streetMarginM: number;
   /** Variation maximale de la longueur de colonne (m/s) : évite les sauts de position. */
@@ -29,9 +33,26 @@ export interface SimParams {
   /** Rayon maximal exploré pour le placement d'un rassemblement statique (m). */
   staticMaxRadiusM: number;
 
+  // --- unités et véhicules ----------------------------------------------------
+  units: {
+    /** Vitesse de déplacement maximale (m/s). */
+    footSpeedMps: number;
+    vehicleSpeedMps: number;
+    /** Accélération et décélération (m/s²). */
+    footAccelMps2: number;
+    vehicleAccelMps2: number;
+    footDecelMps2: number;
+    vehicleDecelMps2: number;
+    /** Vitesse de rotation maximale du cap (rad/s) ; élevée pour un piéton, limitée pour un véhicule. */
+    footTurnRateRadPerS: number;
+    vehicleTurnRateRadPerS: number;
+    /** Distance (m) à la destination en dessous de laquelle l'ordre est considéré comme accompli. */
+    arrivalToleranceM: number;
+    /** Écart (m) entre unités envoyées au même point (elles ne se superposent pas). */
+    formationSpacingM: number;
+  };
+
   // --- individus -------------------------------------------------------------
-  /** Taille des sous-groupes de calcul (individus partageant un repère). */
-  subgroupSize: number;
   /** Raideur du rappel individuel vers sa cible (1/s). */
   memberSpring: number;
   /** Vitesse maximale individuelle = multiple de la vitesse du groupe. */
@@ -45,10 +66,16 @@ export interface SimParams {
   lod: {
     /** Niveau utilisé quand l'hôte ne fournit aucun foyer d'attention (2 = individuel). */
     defaultLevel: 0 | 1 | 2;
-    /** Distance (m) au foyer en dessous de laquelle un groupe est simulé individuellement (N2). */
+    /** Distance (m) au bord du foyer d'attention en dessous de laquelle on simule individuellement (N2). */
     n2RadiusM: number;
-    /** Distance (m) en dessous de laquelle les sous-groupes sont mis à jour (N1) ; au-delà : N0. */
+    /** Distance (m) au bord du foyer en dessous de laquelle les positions suivent leurs cibles (N1) ; au-delà : N0. */
     n1RadiusM: number;
+    /** Taille (nombre d'individus contigus) d'un bloc de niveau de simulation dans un très gros groupe en marche. */
+    blockSize: number;
+    /** Effectif à partir duquel un groupe en marche est découpé en blocs de niveaux distincts. */
+    blockMinGroupSize: number;
+    /** Hystérésis relative (0,1 = 10 %) avant de rétrograder un bloc : évite l'oscillation de niveau en bordure de seuil. */
+    hysteresis: number;
   };
 
   // --- états de rue / navigation -------------------------------------------------
@@ -66,20 +93,33 @@ export const DEFAULT_SIM_PARAMS: SimParams = {
   tickMs: 100,
   nav: DEFAULT_NAV_PARAMS,
   speedByKind: { march: 1.1, secondary: 1.2, dispersing: 1.2 },
+  units: {
+    footSpeedMps: 1.6,
+    vehicleSpeedMps: 6,
+    footAccelMps2: 2,
+    vehicleAccelMps2: 2.5,
+    footDecelMps2: 3,
+    vehicleDecelMps2: 4,
+    footTurnRateRadPerS: 8,
+    vehicleTurnRateRadPerS: 1.8,
+    arrivalToleranceM: 2,
+    formationSpacingM: 3,
+  },
   referenceStreetWidthM: 10,
   narrowStreetMinFactor: 0.6,
   marchDensity: 2,
   staticDensity: 2,
   marchFrontWidthMaxM: 14,
+  marchFrontWidthMinM: 2,
+  arrivalZoneM: 40,
   streetMarginM: 0.8,
   columnLengthRateMps: 4,
   staticMaxRadiusM: 2500,
-  subgroupSize: 32,
   memberSpring: 3,
   memberMaxSpeedFactor: 2.2,
   noiseAmplitudeM: 0.25,
   blendMaxSpeedMps: 3,
-  lod: { defaultLevel: 2, n2RadiusM: 400, n1RadiusM: 2500 },
+  lod: { defaultLevel: 2, n2RadiusM: 400, n1RadiusM: 2500, blockSize: 256, blockMinGroupSize: 4000, hysteresis: 0.1 },
   streetStateEveryTicks: 5,
   waitRetryTicks: 10,
   lookAheadM: 15,

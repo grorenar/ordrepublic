@@ -89,7 +89,7 @@ describe('états de rue géométriques (pas de seuil universel)', () => {
     const A = { x: -100, y: 0 };
     const B = { x: 100, y: 0 };
     expect(ctx.findRoute(A, B, 'vehicle')).not.toBeNull();
-    st.load[0] = 1600; // première rue pleine largeur
+    st.load[0] = 1200; // 1,5 pers/m² : occupe 6 m sur 8, il reste 2 m (< 3,5 m pour un véhicule, > 0,6 m pour un piéton)
     deriveStates(g, st, P);
     expect(ctx.findRoute(A, B, 'vehicle')).toBeNull();
     const walk = ctx.findRoute(A, B, 'crowd');
@@ -103,26 +103,24 @@ describe('états de rue géométriques (pas de seuil universel)', () => {
 describe('répartition de la charge par groupe', () => {
   const g = gridGraph({ cols: 7, rows: 7, spacing: 100, width: 10 });
   const ctx = new NavContext(g, P, createEdgeState(g));
+  const total = (st: ReturnType<typeof createEdgeState>) => st.load.reduce((a, b) => a + b, 0);
 
   it('cortège : la charge totale = effectif × part de la colonne située sur la route', () => {
     const route = ctx.findRoute({ x: -300, y: 0 }, { x: 300, y: 0 }, 'crowd')!;
-    const fp: CrowdFootprint = { kind: 'march', route, centreS: 300, columnLength: 200, size: 4000 };
-    const load = new Float32Array(g.edgeCount);
-    accumulateLoads(g, ctx.grid, [fp], load);
-    const total = load.reduce((a, b) => a + b, 0);
-    expect(total).toBeCloseTo(4000, 1); // colonne entièrement sur la route
-    const half: CrowdFootprint = { ...fp, centreS: 0 }; // la moitié de la colonne est avant le départ
-    accumulateLoads(g, ctx.grid, [half], load);
-    expect(load.reduce((a, b) => a + b, 0)).toBeCloseTo(2000, 1);
+    const fp: CrowdFootprint = { kind: 'march', route, centreS: 300, columnLength: 200, size: 4000, frontWidth: 10 };
+    const st = createEdgeState(g);
+    accumulateLoads(g, ctx.grid, [fp], st, P);
+    expect(total(st)).toBeCloseTo(4000, 1); // colonne entièrement sur la route
+    accumulateLoads(g, ctx.grid, [{ ...fp, centreS: 0 }], st, P); // la moitié de la colonne est avant le départ
+    expect(total(st)).toBeCloseTo(2000, 1);
   });
 
   it('rassemblement statique : effectif réparti sur les rues de l’emprise, jamais davantage que l’effectif', () => {
-    const load = new Float32Array(g.edgeCount);
-    accumulateLoads(g, ctx.grid, [{ kind: 'static', center: { x: 0, y: 0 }, radius: 80, size: 5000 }], load);
-    const total = load.reduce((a, b) => a + b, 0);
-    expect(total).toBeGreaterThan(4999);
-    expect(total).toBeLessThanOrEqual(5000.5);
-    expect(load.filter((v) => v > 0).length).toBeGreaterThanOrEqual(4);
+    const st = createEdgeState(g);
+    accumulateLoads(g, ctx.grid, [{ kind: 'static', center: { x: 0, y: 0 }, radius: 80, size: 5000, density: 2 }], st, P);
+    expect(total(st)).toBeGreaterThan(4999);
+    expect(total(st)).toBeLessThanOrEqual(5000.5);
+    expect(st.load.filter((v) => v > 0).length).toBeGreaterThanOrEqual(4);
   });
 
   it('le calcul de longueur dans un cercle est exact', () => {
@@ -140,7 +138,64 @@ describe('répartition de la charge par groupe', () => {
     expect(c.total).toBe(g.edgeCount);
     expect(c.blocked).toBe(2);
     expect(c.scenarioClosed).toBe(1);
-    const small = countStreetStates(g, st, { halfWidth: 1, halfHeight: 1 });
-    expect(small.total).toBeLessThan(c.total);
+    expect(countStreetStates(g, st, { halfWidth: 1, halfHeight: 1 }).total).toBeLessThan(c.total);
+  });
+});
+
+describe('blocage par section : géométrie, répartition et possibilité de circulation', () => {
+  const run = (width: number, fp: (route: ReturnType<NavContext['findRoute']> & object) => CrowdFootprint, params = P) => {
+    const g = gridGraph({ cols: 3, rows: 1, spacing: 200, width });
+    const ctx = new NavContext(g, params, createEdgeState(g));
+    const route = ctx.findRoute({ x: -200, y: 0 }, { x: 200, y: 0 }, 'crowd')!;
+    const st = createEdgeState(g);
+    accumulateLoads(g, ctx.grid, [fp(route)], st, params);
+    deriveStates(g, st, params);
+    return { st, g };
+  };
+
+  it('une foule courte bloque quand même le véhicule si sa section occupe la rue (pas de moyenne sur l’arête)', () => {
+    // colonne de 30 m sur une arête de 200 m : occupation MOYENNE faible, mais la section est pleine (rue de 10 m, front de 14 m)
+    const { st } = run(10, (route) => ({ kind: 'march', route, centreS: 100, columnLength: 30, size: 300, frontWidth: 14 }));
+    expect(st.density[0]).toBeLessThan(1.5);
+    expect(st.vehState[0]).toBe(3);
+    expect(st.footState[0]).toBeLessThan(3); // un piéton traverse une foule clairsemée
+  });
+
+  it('la même foule sur une rue plus large laisse passer les véhicules (largeur libre ≥ 3,5 m)', () => {
+    const { st } = run(20, (route) => ({ kind: 'march', route, centreS: 100, columnLength: 30, size: 600, frontWidth: 14 }));
+    expect(st.vehState[0]).toBeLessThan(3);
+    expect(st.occupiedWidth[0]).toBeCloseTo(14, 3);
+    expect(st.vehState[0]).toBeGreaterThanOrEqual(2); // partiellement obstruée
+  });
+
+  it('largeur libre minimale configurable (3,5 m par défaut)', () => {
+    const fp = (route: never) => ({ kind: 'march', route, centreS: 100, columnLength: 30, size: 600, frontWidth: 14 }) as CrowdFootprint;
+    expect(run(17, fp as never).st.vehState[0]).toBe(3); // 17 − 14 = 3 m < 3,5 m
+    expect(run(17, fp as never, { ...P, vehicleMinFreeWidthM: 2.5 }).st.vehState[0]).toBeLessThan(3);
+  });
+
+  it('une présence de quelques mètres seulement n’occupe pas de section (seuil de présence)', () => {
+    const { st } = run(10, (route) => ({ kind: 'march', route, centreS: 1, columnLength: 2, size: 8, frontWidth: 14 }));
+    expect(st.vehState[0]).toBe(0);
+  });
+
+  it('piéton : la saturation n’est pas le seul critère — largeur libre nulle ET densité élevée bloquent aussi', () => {
+    // 1 800 personnes sur 30 m × 10 m = 6 pers/m² ≥ saturation
+    const jam = run(10, (route) => ({ kind: 'march', route, centreS: 100, columnLength: 30, size: 1800, frontWidth: 10 }));
+    expect(jam.st.footState[0]).toBe(3);
+    // 750 personnes sur la même section : 2,5 pers/m² (< saturation), rue pleine (0 m libre) mais densité ≥ 1,5 → bloqué
+    const dense = run(10, (route) => ({ kind: 'march', route, centreS: 100, columnLength: 30, size: 750, frontWidth: 10 }));
+    expect(dense.st.density[0]).toBeLessThan(P.jamDensity);
+    expect(dense.st.footState[0]).toBe(3);
+    // densité faible malgré la rue occupée : jamais bloqué
+    const sparse = run(10, (route) => ({ kind: 'march', route, centreS: 100, columnLength: 30, size: 150, frontWidth: 10 }));
+    expect(sparse.st.density[0]).toBeLessThan(P.footBlockMinDensity);
+    expect(sparse.st.footState[0]).toBeLessThan(3);
+  });
+
+  it('les seuils de saturation et de densité sont configurables', () => {
+    const fp = (route: never) => ({ kind: 'march', route, centreS: 100, columnLength: 30, size: 750, frontWidth: 10 }) as CrowdFootprint;
+    expect(run(10, fp as never, { ...P, footBlockMinDensity: 4 }).st.footState[0]).toBeLessThan(3);
+    expect(run(10, fp as never, { ...P, jamDensity: 2 }).st.footState[0]).toBe(3);
   });
 });

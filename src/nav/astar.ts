@@ -7,6 +7,13 @@ import type { EdgeState } from './streetState';
 import type { NavParams } from './params';
 
 /** Contexte de navigation : graphe + index + paramètres + état dynamique (+ tampons réutilisés). */
+/** Zone circulaire (m) dans laquelle les piétons peuvent traverser une foule dense (arrivée à destination). */
+export interface SoftZone {
+  x: number;
+  y: number;
+  r: number;
+}
+
 export class NavContext {
   readonly grid: EdgeGrid;
   private readonly stamp: Uint32Array;
@@ -42,8 +49,20 @@ export class NavContext {
     return (f & EdgeFlag.Foot) !== 0;
   }
 
-  /** Coût (secondes de jeu) pour parcourir `len` mètres de l'arête `e` ; Infinity si impraticable. */
-  edgeCost(e: number, mode: NavMode, len: number, dynamic: boolean): number {
+  /** Milieu d'une arête (pour la zone d'arrivée). */
+  private inZone(e: number, z: SoftZone): boolean {
+    const g = this.graph;
+    const mx = ((g.nodeX[g.edgeA[e] as number] as number) + (g.nodeX[g.edgeB[e] as number] as number)) / 2;
+    const my = ((g.nodeY[g.edgeA[e] as number] as number) + (g.nodeY[g.edgeB[e] as number] as number)) / 2;
+    return Math.hypot(mx - z.x, my - z.y) <= z.r;
+  }
+
+  /**
+   * Coût (secondes de jeu) pour parcourir `len` mètres de l'arête `e` ; Infinity si impraticable.
+   * `soft` : zone d'arrivée — un piéton qui rejoint un rassemblement peut y pénétrer (lentement) même si la
+   * foule y est dense ; jamais un véhicule.
+   */
+  edgeCost(e: number, mode: NavMode, len: number, dynamic: boolean, soft?: SoftZone): number {
     const p = this.params;
     const cls = this.graph.edgeClass[e] as number;
     let speed: number;
@@ -66,8 +85,10 @@ export class NavContext {
         if (s === 3) return Infinity;
         speed *= s === 0 ? 1 : s === 1 ? 0.7 : 0.35;
       } else {
-        if (st.footState[e] === 3) return Infinity;
-        speed *= st.speedFactor[e] as number;
+        if (st.footState[e] === 3) {
+          if (!soft || !this.inZone(e, soft)) return Infinity;
+          speed *= p.minSpeedFactor * 4; // traversée lente d'une foule dense à destination
+        } else speed *= st.speedFactor[e] as number;
       }
     }
     return (len / speed) * mult;
@@ -86,6 +107,7 @@ export class NavContext {
       maxSnap?: number;
       /** Départ imposé sur une arête (replanification à partir de la tête d'un cortège) : `toward` interdit de faire demi-tour. */
       start?: { edge: number; t: number; toward?: number };
+      soft?: SoftZone;
     } = {},
   ): Route | null {
     const g = this.graph;
@@ -97,7 +119,8 @@ export class NavContext {
     if (!S || !T) return null;
     const version = this.state?.version ?? 0;
     const baseRate = (e: number) => this.edgeCost(e, mode, 1, false); // coût/m sans état dynamique (sortie d'une rue bloquée)
-    const dynRate = (e: number) => this.edgeCost(e, mode, 1, true); // coût/m avec état dynamique (∞ si impraticable)
+    const soft = opts.soft;
+    const dynRate = (e: number) => this.edgeCost(e, mode, 1, true, soft); // coût/m avec état dynamique (∞ si impraticable)
     const vMax = mode === 'vehicle' ? this.vMaxVehicle : this.params.speedFootMps;
 
     // Candidat direct (même arête).
@@ -179,7 +202,7 @@ export class NavContext {
         const forward = g.edgeA[e] === n;
         if (!this.canTraverse(e, forward, mode)) continue;
         const m = forward ? (g.edgeB[e] as number) : (g.edgeA[e] as number);
-        const c = this.edgeCost(e, mode, g.edgeLen[e] as number, true);
+        const c = this.edgeCost(e, mode, g.edgeLen[e] as number, true, soft);
         if (!isFinite(c)) continue;
         const ng = gn + c;
         if (this.stamp[m] !== gen || ng < (this.gScore[m] as number) - 1e-12) {
@@ -261,10 +284,10 @@ export class NavContext {
    * Premier indice d'arête de la route (à partir de `fromIndex`) devenu impraticable pour ce mode
    * (fermeture de scénario, blocage par la foule), ou -1 si la route est libre.
    */
-  firstBlockedEdge(route: Route, fromIndex: number): number {
+  firstBlockedEdge(route: Route, fromIndex: number, soft?: SoftZone): number {
     for (let i = Math.max(0, fromIndex); i < route.edges.length; i++) {
       const e = route.edges[i] as number;
-      if (!isFinite(this.edgeCost(e, route.mode, 1, true))) return i;
+      if (!isFinite(this.edgeCost(e, route.mode, 1, true, soft))) return i;
     }
     return -1;
   }

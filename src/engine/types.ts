@@ -84,7 +84,6 @@ export interface GroupSpec {
 /** Individus simulés : tableaux typés, un enregistrement par personne (aucun plafond structurel). */
 export interface MemberSet {
   n: number;
-  subgroupSize: number;
   x: Float32Array;
   y: Float32Array;
   /** Positions du tick précédent (interpolation du rendu). */
@@ -173,9 +172,120 @@ export interface CrowdGroup {
   dispersal: Dispersal | null;
   // niveaux de simulation
   level: SimLevel;
+  /** Niveaux par bloc d'individus (très gros groupes en marche) ; null = niveau unique du groupe. */
+  blocks: BlockLevels | null;
   /** Vrai quand les positions sont périmées (sortie du niveau N0) et doivent être réalignées sur les cibles sans transition. */
   needsSnap: boolean;
   blend: Blend | null;
+}
+
+export interface BlockLevels {
+  size: number;
+  level: Uint8Array;
+  /** 1 si le bloc était en N0 (positions périmées) : à réaligner sur ses cibles dès qu'il repasse en N1/N2. */
+  stale: Uint8Array;
+}
+
+// --- Forces de l'ordre et véhicules (phase 3c) ---------------------------------
+export type ForceKind = 'crs' | 'police_nationale' | 'gendarmerie_mobile' | 'unite_speciale';
+export type VehicleKind =
+  | 'fourgon_police'
+  | 'fourgon_crs'
+  | 'voiture_police'
+  | 'ambulance'
+  | 'camion_pompiers'
+  | 'vehicule_secours_leger'
+  | 'vehicule_gendarmerie'
+  | 'voiture_banalisee'
+  | 'moto_police'
+  | 'camion_a_eau';
+/** États d'unité (↔ anneaux de la planche de référence). */
+export type UnitStatus = 'idle' | 'moving' | 'waiting' | 'engaged' | 'in_difficulty' | 'unavailable';
+
+export interface Loadout {
+  shield: boolean;
+  helmet: boolean;
+}
+
+export interface OrderState {
+  id: Id;
+  kind: 'move';
+  target: Vec2;
+  cause: Cause;
+  issuedAtMs: number;
+}
+
+/** État de déplacement commun aux unités et aux véhicules. */
+export interface Mover {
+  mode: 'foot' | 'vehicle';
+  x: number;
+  y: number;
+  /** Position et cap au tick précédent (interpolation du rendu). */
+  px: number;
+  py: number;
+  heading: number;
+  prevHeading: number;
+  speedMps: number;
+  route: Route | null;
+  routeS: number;
+  status: UnitStatus;
+  order: OrderState | null;
+  waitingSinceMs: number | null;
+  lastRouteStateVersion: number;
+  lastRetryTick: number;
+}
+
+export interface UnitEntity extends Mover {
+  id: Id;
+  entity: 'unit';
+  force: ForceKind;
+  loadout: Loadout;
+  /** Identifiant fictif STABLE de jeu (jamais réattribué, jamais modifié par un déplacement ou un zoom). */
+  callsign: string;
+  /** Numéro court affiché sur le pion. */
+  num: string;
+  headcount: number;
+}
+
+export interface VehicleEntity extends Mover {
+  id: Id;
+  entity: 'vehicle';
+  vehicle: VehicleKind;
+  callsign: string;
+  crew: number;
+}
+
+export type MoverEntity = UnitEntity | VehicleEntity;
+
+export interface UnitSpec {
+  force: ForceKind;
+  loadout?: Partial<Loadout>;
+  callsign: string;
+  num: string;
+  headcount: number;
+  pos: Vec2;
+  heading?: number;
+}
+
+export interface VehicleSpec {
+  vehicle: VehicleKind;
+  callsign: string;
+  crew: number;
+  pos: Vec2;
+  heading?: number;
+}
+
+export type OrderRequest =
+  | { kind: 'move'; ids: Id[]; target: Vec2 }
+  | { kind: 'cancel'; ids: Id[] };
+
+export interface OrderResult {
+  id: Id;
+  ok: boolean;
+  /** Longueur de l'itinéraire (m) si l'ordre est accepté. */
+  routeLengthM?: number;
+  /** Raison du refus, en français, sinon. */
+  reason?: string;
 }
 
 export type Command =

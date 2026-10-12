@@ -62,7 +62,7 @@ export function frameEntry(f: RouteFrame, lat: number): { x: number; y: number }
   return { x: f.x + f.nx * lat * f.hw, y: f.y + f.ny * lat * f.hw };
 }
 
-function marchTargets(g: CrowdGroup, c: MotionCtx): void {
+function marchTargets(g: CrowdGroup, c: MotionCtx, from: number, to: number): void {
   const m = g.members;
   const route = g.route as NonNullable<CrowdGroup['route']>;
   const n = m.n;
@@ -72,7 +72,7 @@ function marchTargets(g: CrowdGroup, c: MotionCtx): void {
   const lay = g.layout;
   const end = lay ? routeFrame(g, c, route, true) : null;
   const cursor = new RouteCursor(route);
-  for (let i = m.activeStart; i < n; i++) {
+  for (let i = Math.max(from, m.activeStart); i < to; i++) {
     const s = sc + columnOffset(i, n, L);
     if (lay && end && s >= len) {
       // prolongement rectiligne depuis le point de sortie de l'individu (SON décalage latéral) jusqu'à son créneau
@@ -155,14 +155,20 @@ function dispersalTargets(g: CrowdGroup, c: MotionCtx): void {
   }
 }
 
-/** Calcule les cibles de tous les individus présents (g.members.tx/ty). */
-export function computeTargets(g: CrowdGroup, c: MotionCtx): void {
+/**
+ * Calcule les cibles des individus présents (g.members.tx/ty). `from/to` limitent le calcul à un intervalle de
+ * rangs (niveaux par bloc) : seulement possible pour une colonne en marche, sinon tout le groupe est calculé.
+ */
+export function computeTargets(g: CrowdGroup, c: MotionCtx, from = 0, to = g.members.n): void {
+  let ranged = false;
   switch (g.phase) {
     case 'forming':
     case 'moving':
     case 'waiting':
-      if (g.kind !== 'static' && g.route) marchTargets(g, c);
-      else if (g.layout) staticTargets(g);
+      if (g.kind !== 'static' && g.route) {
+        marchTargets(g, c, from, to);
+        ranged = true;
+      } else if (g.layout) staticTargets(g);
       break;
     case 'settled':
       if (g.layout) staticTargets(g);
@@ -179,36 +185,40 @@ export function computeTargets(g: CrowdGroup, c: MotionCtx): void {
     if (tau >= 1) g.blend = null;
     const e = tau * tau * (3 - 2 * tau);
     const m = g.members;
-    for (let i = m.activeStart; i < m.n; i++) {
+    const lo = ranged ? Math.max(from, m.activeStart) : m.activeStart;
+    const hi = ranged ? to : m.n;
+    for (let i = lo; i < hi; i++) {
       m.tx[i] = (b.fromX[i] as number) + ((m.tx[i] as number) - (b.fromX[i] as number)) * e;
       m.ty[i] = (b.fromY[i] as number) + ((m.ty[i] as number) - (b.fromY[i] as number)) * e;
     }
   }
 }
 
-/** Met à jour les positions des individus selon le niveau de simulation. */
-export function updateMembers(g: CrowdGroup, c: MotionCtx): void {
-  if (g.phase === 'dispersed' || g.level === 0) return;
+/** N1 : rapprochement borné vers la cible (aucune téléportation, même en sortant de N2 avec un retard de rappel). */
+function followTargets(g: CrowdGroup, c: MotionCtx, i0: number, i1: number): void {
   const m = g.members;
-  const dt = c.params.tickMs / 1000;
-  computeTargets(g, c);
-  if (g.needsSnap) {
-    m.x.set(m.tx);
-    m.y.set(m.ty);
-    m.px.set(m.tx);
-    m.py.set(m.ty);
-    g.needsSnap = false;
-    return;
+  const maxStep = c.params.blendMaxSpeedMps * (c.params.tickMs / 1000);
+  const { x, y, tx, ty } = m;
+  for (let i = i0; i < i1; i++) {
+    const dx = (tx[i] as number) - (x[i] as number);
+    const dy = (ty[i] as number) - (y[i] as number);
+    const d2 = dx * dx + dy * dy;
+    if (d2 <= maxStep * maxStep) {
+      x[i] = tx[i] as number;
+      y[i] = ty[i] as number;
+    } else {
+      const k = maxStep / Math.sqrt(d2);
+      x[i] = (x[i] as number) + dx * k;
+      y[i] = (y[i] as number) + dy * k;
+    }
   }
-  m.px.set(m.x);
-  m.py.set(m.y);
-  if (g.level === 1) {
-    m.x.set(m.tx);
-    m.y.set(m.ty);
-    return;
-  }
-  // --- N2 : dynamique individuelle ------------------------------------------------
+}
+
+/** N2 : dynamique individuelle (rappel amorti + bruit stateless + rejet des bâtiments). */
+function dynamics(g: CrowdGroup, c: MotionCtx, i0: number, i1: number): void {
+  const m = g.members;
   const p = c.params;
+  const dt = p.tickMs / 1000;
   const k = p.memberSpring;
   const base = g.kind === 'static' || g.phase === 'settled' ? p.speedByKind.march : Math.max(g.speedMps, 0.3);
   const vmax = Math.max(0.8, base) * p.memberMaxSpeedFactor;
@@ -217,7 +227,7 @@ export function updateMembers(g: CrowdGroup, c: MotionCtx): void {
   const frac = (c.tick & 7) / 8;
   const mask = c.mask;
   const { x, y, tx, ty, seed } = m;
-  for (let i = m.activeStart; i < m.n; i++) {
+  for (let i = i0; i < i1; i++) {
     const sd = seed[i] as number;
     const nx0 = noise(sd, bucket, 0);
     const ny0 = noise(sd, bucket, 1);
@@ -242,6 +252,64 @@ export function updateMembers(g: CrowdGroup, c: MotionCtx): void {
     x[i] = nx;
     y[i] = ny;
   }
+}
+
+/** Met à jour les positions des individus selon le niveau de simulation (du groupe, ou bloc par bloc). */
+export function updateMembers(g: CrowdGroup, c: MotionCtx): void {
+  if (g.phase === 'dispersed') return;
+  const m = g.members;
+  const bl = g.blocks;
+  if (bl) {
+    // niveaux par bloc : on traite chaque suite de blocs consécutifs de même niveau
+    const nb = bl.level.length;
+    let b = 0;
+    while (b < nb) {
+      const lvl = bl.level[b] as number;
+      let e = b;
+      while (e + 1 < nb && bl.level[e + 1] === lvl) e++;
+      const i0 = Math.max(b * bl.size, m.activeStart);
+      const i1 = Math.min((e + 1) * bl.size, m.n);
+      if (lvl === 0) {
+        for (let k = b; k <= e; k++) bl.stale[k] = 1;
+      } else if (i1 > i0) {
+        computeTargets(g, c, i0, i1);
+        // les blocs sortant de N0 sont réalignés sur leurs cibles (ils étaient hors de portée du foyer)
+        for (let k = b; k <= e; k++) {
+          if (bl.stale[k]) {
+            const a = Math.max(k * bl.size, m.activeStart);
+            const z = Math.min((k + 1) * bl.size, m.n);
+            for (let i = a; i < z; i++) {
+              m.x[i] = m.tx[i] as number;
+              m.y[i] = m.ty[i] as number;
+              m.px[i] = m.tx[i] as number;
+              m.py[i] = m.ty[i] as number;
+            }
+            bl.stale[k] = 0;
+          }
+        }
+        m.px.set(m.x.subarray(i0, i1), i0);
+        m.py.set(m.y.subarray(i0, i1), i0);
+        if (lvl === 1) followTargets(g, c, i0, i1);
+        else dynamics(g, c, i0, i1);
+      }
+      b = e + 1;
+    }
+    return;
+  }
+  if (g.level === 0) return;
+  computeTargets(g, c);
+  if (g.needsSnap) {
+    m.x.set(m.tx);
+    m.y.set(m.ty);
+    m.px.set(m.tx);
+    m.py.set(m.ty);
+    g.needsSnap = false;
+    return;
+  }
+  m.px.set(m.x);
+  m.py.set(m.y);
+  if (g.level === 1) followTargets(g, c, m.activeStart, m.n);
+  else dynamics(g, c, m.activeStart, m.n);
 }
 
 /** Évalue les positions (sans dynamique) pour l'affichage d'un groupe simulé à un niveau inférieur. */

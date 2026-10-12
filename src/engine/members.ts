@@ -2,10 +2,9 @@ import { hash32, unit } from './rng';
 import type { MemberSet } from './types';
 
 /** Crée `n` individus (tableaux typés). Positions à initialiser par l'appelant. */
-export function createMembers(n: number, seed: number, subgroupSize: number): MemberSet {
+export function createMembers(n: number, seed: number): MemberSet {
   const m: MemberSet = {
     n,
-    subgroupSize,
     x: new Float32Array(n),
     y: new Float32Array(n),
     px: new Float32Array(n),
@@ -39,7 +38,6 @@ export function sliceMembers(m: MemberSet, from: number, to: number): MemberSet 
   const n = Math.max(0, to - from);
   const out: MemberSet = {
     n,
-    subgroupSize: m.subgroupSize,
     x: m.x.slice(from, to),
     y: m.y.slice(from, to),
     px: m.px.slice(from, to),
@@ -67,7 +65,6 @@ export function concatMembers(a: MemberSet, b: MemberSet): MemberSet {
   };
   const out: MemberSet = {
     n,
-    subgroupSize: a.subgroupSize,
     x: cat(a.x, b.x),
     y: cat(a.y, b.y),
     px: cat(a.px, b.px),

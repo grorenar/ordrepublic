@@ -9,9 +9,14 @@ export interface NavParams {
   /** Multiplicateurs de coût pour les cortèges (préfèrent rues et places). */
   crowdPenaltyFootway: number;
   crowdPenaltySteps: number;
-  /** Largeur d'un véhicule et marge de manœuvre (m) : passage possible si largeur libre ≥ somme. */
-  vehicleWidthM: number;
-  vehicleMarginM: number;
+  /** Largeur libre minimale (m) pour qu'un véhicule franchisse une section de rue partiellement occupée (véhicule + marge de manœuvre). */
+  vehicleMinFreeWidthM: number;
+  /** Largeur libre minimale (m) pour qu'un piéton franchisse une foule, combinée à `footBlockMinDensity`. */
+  footMinWidthM: number;
+  /** Densité (pers/m²) en dessous de laquelle une foule ne bloque jamais les piétons, quelle que soit la largeur libre. */
+  footBlockMinDensity: number;
+  /** Longueur minimale (m) de présence d'une foule sur une arête pour qu'elle occupe une section de la rue. */
+  minPresenceM: number;
   /** Densité de référence d'une foule « pleine largeur » (personnes/m²). */
   referenceDensity: number;
   /** Densité (pers/m²) à partir de laquelle la rue est « ralentie ». */
@@ -41,8 +46,10 @@ export const DEFAULT_NAV_PARAMS: NavParams = {
   },
   crowdPenaltyFootway: 0.5,
   crowdPenaltySteps: 2,
-  vehicleWidthM: 2.5,
-  vehicleMarginM: 1,
+  vehicleMinFreeWidthM: 3.5,
+  footMinWidthM: 0.6,
+  footBlockMinDensity: 1.5,
+  minPresenceM: 3,
   referenceDensity: 2,
   slowedDensity: 0.5,
   partialObstruction: 0.4,
