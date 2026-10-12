@@ -112,6 +112,7 @@ dl { margin: 0 0 8px; } dl div { display: flex; justify-content: space-between; 
 .ctl-group.zone span { padding: 0 8px; font-size: 12px; min-width: 96px; text-align: center; font-variant-numeric: tabular-nums; }
 .map-bottom { left: 12px; bottom: 36px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; max-width: calc(100% - 280px); }
 .map-bottom button { background: rgba(8,12,20,.92); } .map-bottom button.primary { background: #0e7490; }
+.map-label { background: rgba(8,12,20,.92); border: 1px solid var(--border, #334155); border-radius: 8px; padding: 7px 12px; font-size: 13px; color: #cbd5e1; cursor: default; }
 .check.small { background: rgba(8,12,20,.92); padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; font-size: 12px; }
 .maplibregl-ctrl-attrib { font-size: 11px !important; }
 

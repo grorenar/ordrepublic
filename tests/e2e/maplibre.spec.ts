@@ -264,6 +264,7 @@ test.describe('fournisseur OpenStreetMap par défaut', () => {
     await expect(page.getByTestId('game')).toHaveAttribute('data-engine', 'preview', { timeout: 20_000 });
     await page.getByTestId('play-here').click();
     await expect(page.getByTestId('live-progress')).toContainText(/tentative|Nouvelle tentative/, { timeout: 10_000 });
+    await expect(page.getByTestId('load-pois')).toBeChecked(); // les lieux d'intérêt restent demandés tant que le joueur ne décoche pas
     await expect(page.getByTestId('game')).toHaveAttribute('data-engine', 'ready', { timeout: 30_000 });
     expect(n).toBe(4);
   });
@@ -327,9 +328,10 @@ test.describe('fournisseur OpenStreetMap par défaut', () => {
     await expect(page.getByTestId('map-notice')).toContainText('tuiles', { timeout: 20_000 });
     await expect(page.getByTestId('game')).toHaveAttribute('data-map-kind', 'maplibre');
     await expect(page.getByTestId('retry-map')).toHaveCount(0);
-    // le jeu reste utilisable et on peut basculer volontairement vers le fond schématique
-    await page.getByTestId('switch-map').click();
-    await expect(page.getByTestId('game')).toHaveAttribute('data-map-kind', 'schematic');
+    // le fond choisi au départ est verrouillé : plus de bouton de bascule en jeu (le choix se fait à l'accueil)
+    await expect(page.getByTestId('switch-map')).toHaveCount(0);
+    await expect(page.getByTestId('map-label')).toContainText('Fond');
+    await expect(page.getByTestId('game')).toHaveAttribute('data-map-kind', 'maplibre');
   });
 
   test('perte de connexion Internet : message explicite', async ({ page, context }) => {

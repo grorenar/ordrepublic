@@ -16,8 +16,6 @@ export const OVERPASS_ENDPOINTS = ['https://overpass-api.de/api/interpreter', 'h
 export const LIVE_MARGIN_M = 80;
 /** Délai par tentative : un service qui répond le fait en quelques secondes ; une connexion qui traîne est abandonnée et retentée. */
 export const LIVE_TIMEOUT_MS = 20_000;
-/** À partir de cette tentative, la requête est allégée (sans lieux d'intérêt) : le jeu reste jouable, seuls les noms de lieux manquent. */
-export const LIVE_LIGHT_FROM_ATTEMPT = 3;
 export const MIN_EDGES = 10;
 /** Les services Overpass publics sont souvent saturés : on réessaie jusqu'à 10 fois (attente croissante) avant de déclarer l'échec. */
 export const LIVE_MAX_ATTEMPTS = 10;
@@ -42,6 +40,8 @@ export interface LiveOptions {
   endpoints?: string[];
   cache?: ZoneCache | null;
   timeoutMs?: number;
+  /** Choix du joueur, relu à chaque tentative : inclure les lieux d'intérêt (défaut oui). Jamais imposé par le chargeur. */
+  includePois?: () => boolean;
   /** Nombre maximal de tentatives (toutes erreurs de service confondues), défaut 10. */
   maxAttempts?: number;
   /** Attente de base entre deux tentatives (ms) ; croît linéairement (×n), plafonnée à 8×. Défaut 1500. */
@@ -95,7 +95,7 @@ export async function loadZoneGraph(center: LngLat, half: { halfWidth: number; h
   const baseDelay = o.retryDelayMs ?? LIVE_RETRY_DELAY_MS;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const endpoint = endpoints[(attempt - 1) % endpoints.length] as string;
-    const light = attempt >= LIVE_LIGHT_FROM_ATTEMPT;
+    const light = o.includePois ? !o.includePois() : false;
     const query = light ? lightQuery : fullQuery;
     progress(`Téléchargement des rues et bâtiments OpenStreetMap (${new URL(endpoint).host})${maxAttempts > 1 ? ` — tentative ${attempt}/${maxAttempts}` : ''}${light ? ', requête allégée sans lieux' : ''}…`, 1);
     const ctl = new AbortController();

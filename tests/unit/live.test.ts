@@ -60,19 +60,19 @@ describe('chargement à la demande du graphe OSM d’un secteur', () => {
     expect(progress.some((t) => /Nouvelle tentative/.test(t))).toBe(true);
   });
 
-  it('requête complète (avec lieux d’intérêt) puis allégée dès la 3e tentative ; une connexion qui traîne est abandonnée et retentée', async () => {
+  it('toutes les tentatives demandent les lieux d’intérêt tant que le joueur ne choisit pas autrement ; son choix est relu à chaque tentative', async () => {
     const bodies: string[] = [];
+    let pois = true;
     const f = ((_u: RequestInfo | URL, init?: RequestInit) => {
       bodies.push(String((init?.body as URLSearchParams).get('data')));
-      if (bodies.length <= 3) return new Promise((_res, rej) => init?.signal?.addEventListener('abort', () => rej(new DOMException('x', 'AbortError')))); // service qui ne répond pas
+      if (bodies.length === 3) pois = false; // le joueur décoche pendant le chargement
+      if (bodies.length <= 4) return new Promise((_res, rej) => init?.signal?.addEventListener('abort', () => rej(new DOMException('x', 'AbortError'))));
       return Promise.resolve(new Response(JSON.stringify(overpassGrid(metz)), { status: 200 }));
     }) as typeof fetch;
-    const r = await loadZoneGraph(metz, half, 'Metz', { fetchFn: f, cache: null, timeoutMs: 30, retryDelayMs: 1 });
-    expect(bodies.length).toBe(4);
-    expect(bodies[0]).toContain('["shop"]');
-    expect(bodies[1]).toContain('["shop"]');
-    expect(bodies[2]).not.toContain('["shop"]');
-    expect(bodies[3]).not.toContain('["shop"]');
+    const r = await loadZoneGraph(metz, half, 'Metz', { fetchFn: f, cache: null, timeoutMs: 30, retryDelayMs: 1, includePois: () => pois });
+    expect(bodies.length).toBe(5);
+    expect(bodies.slice(0, 3).every((b) => b.includes('["shop"]'))).toBe(true); // jamais allégée d'office
+    expect(bodies[3]).not.toContain('["shop"]'); // allégée seulement après le choix du joueur
     expect(r.graph.edgeCount).toBeGreaterThan(100);
   });
 

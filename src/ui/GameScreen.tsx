@@ -124,6 +124,11 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
   const [aerial, setAerial] = useState(false);
   /** Vue mixte : noms de rues, de lieux et contours de bâtiments par-dessus la photo aérienne. */
   const [labels, setLabels] = useState(true);
+  /** Chargement OSM : inclure les lieux d'intérêt (commerces, écoles…). Au choix du joueur, modifiable pendant le chargement ; jamais imposé. */
+  const [withPois, setWithPois] = useState(true);
+  const withPoisRef = useRef(true);
+  withPoisRef.current = withPois;
+  const [failedAttempts, setFailedAttempts] = useState(0);
   const provider: MapProviderId = debug.providerOverride ?? (aerial ? (labels ? 'ign-hybrid' : 'ign-aerial') : settings.provider);
   const origin: LngLat = live?.origin ?? city.center;
   const frame = useMemo(() => new LocalFrame(origin), [origin.lng, origin.lat]);
@@ -568,14 +573,20 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
     const ctl = new AbortController();
     abortRef.current = ctl;
     setLoadSecs(0);
+    setFailedAttempts(0);
     setLiveStatus({ state: 'loading', text: 'Préparation de la requête…', step: 1 });
     try {
       const r = await loadZoneGraph(center, ZONE_LEVELS[zoneLevel] as (typeof ZONE_LEVELS)[number], city.name, {
         cache: indexedDbCache(),
         signal: ctl.signal,
+        includePois: () => withPoisRef.current,
         maxAttempts: debug.liveAttempts,
         retryDelayMs: debug.liveRetryMs,
-        onProgress: (text, step) => setLiveStatus({ state: 'loading', text, step }),
+        onProgress: (text, step) => {
+          const m = /\((\d+)\/\d+ échouée/.exec(text);
+          if (m) setFailedAttempts(Number(m[1]));
+          setLiveStatus({ state: 'loading', text, step });
+        },
       });
       // étape 3 : démarrage du moteur (l'écran de chargement reste affiché jusqu'à ce que la simulation soit prête)
       setLiveStatus({ state: 'loading', text: 'Démarrage de la simulation…', step: 3 });
@@ -682,6 +693,15 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
                 {liveStatus.text} · {loadSecs} s
               </p>
               {loadSecs >= 12 && liveStatus.step === 1 && <p class="small">Le service OpenStreetMap peut être lent selon la charge : une connexion qui traîne est abandonnée après 20 s puis retentée automatiquement (jusqu’à 10 fois).</p>}
+              <label class="check small">
+                <input type="checkbox" data-testid="load-pois" checked={withPois} onChange={(e) => setWithPois((e.target as HTMLInputElement).checked)} />
+                Charger aussi les lieux d’intérêt (commerces, écoles…) — décochez pour une requête plus légère
+              </label>
+              {failedAttempts >= 3 && liveStatus.step === 1 && (
+                <p class="small" data-testid="load-hint">
+                  Le service met du temps à répondre ({failedAttempts} tentatives échouées). Vous pouvez continuer à attendre avec toutes les informations, ou décocher les lieux d’intérêt pour alléger la requête, ou annuler.
+                </p>
+              )}
               <button type="button" data-testid="load-cancel" onClick={() => abortRef.current?.abort()} disabled={liveStatus.step >= 2}>
                 Annuler
               </button>
@@ -744,9 +764,9 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
               Planification
             </button>
           )}
-          <button type="button" data-testid="switch-map" onClick={switchMap} title="Basculer entre la carte OSM et le fond schématique (la simulation redémarre)">
+          <span class="map-label" data-testid="map-label" title="Fond choisi au départ. Pour en changer, revenez à l’accueil (le choix est mémorisé).">
             Fond : {mapLabel}
-          </button>
+          </span>
           {mapKind === 'osm' && (
             <button type="button" data-testid="toggle-aerial" aria-pressed={aerial} onClick={() => setAerial((v) => !v)} title="Basculer entre le plan et la vue aérienne (IGN, France)">
               {aerial ? (labels ? 'Vue : aérienne + noms' : 'Vue : aérienne (IGN)') : 'Vue : plan'}
