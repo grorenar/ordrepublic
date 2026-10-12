@@ -41,8 +41,8 @@ describe('contrôleur de jeu (pont moteur ↔ interface)', () => {
     expect(c.selectedMovers().map((e) => e.id)).toEqual(['U-1', 'U-2', 'V-1']);
     c.select({ type: 'unit', id: 'U-2' }, true);
     expect(c.selectedMovers().map((e) => e.id)).toEqual(['U-1', 'V-1']);
-    c.select({ type: 'group', id: 'G-1' });
-    expect(c.selection).toEqual([{ type: 'group', id: 'G-1' }]);
+    c.select({ type: 'group', id: c.sim.groupByKey('rassemblement')!.id });
+    expect(c.selection).toEqual([{ type: 'group', id: c.sim.groupByKey('rassemblement')!.id }]);
     c.select(null);
     expect(c.selection).toEqual([]);
   });
@@ -90,7 +90,7 @@ describe('contrôleur de jeu (pont moteur ↔ interface)', () => {
     const c = make();
     c.setView({ x: 0, y: 0 }, 300);
     c.runTicks(200);
-    const g = c.sim.group('G-1')!;
+    const g = c.sim.group(c.sim.groupByKey('rassemblement')!.id)!;
     // la caméra s'éloigne brusquement (hors de portée) : le cortège passe en N0 et n'est plus mis à jour
     c.setView({ x: 20000, y: 20000 }, 300);
     c.runTicks(300);

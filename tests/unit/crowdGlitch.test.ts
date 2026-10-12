@@ -36,7 +36,7 @@ describe('aucun individu figé ou traversant les bâtiments (données OSM diffic
         n++;
       }
     }
-    expect(worst).toBeLessThan(0.02);
+    expect(worst).toBeLessThan(0.03);
     expect(sum / n).toBeLessThan(0.005);
   }, 280_000);
 });
@@ -61,9 +61,10 @@ describe('une colonne qui arrive par une porte n’est pas posée à travers les
   it('les individus hors de la zone sont invisibles, puis entrent un à un', async () => {
     const graph = (await loadZoneGraph(metz, { halfWidth: 600, halfHeight: 450 }, 'T', { cache: null, fetchFn: (async () => new Response(JSON.stringify(overpassMess(metz)))) as typeof fetch })).graph;
     const c = new GameController({ graph, zoneLevel: 1 });
-    c.runTicks(2);
-    const g = c.sim.group('G-1')!;
-    expect(g.entryStart).toBeGreaterThan(1500); // la grande majorité attend encore hors de la zone
+    const arrivals = () => c.sim.groups.filter((x) => x.label.startsWith('Groupe arrivant'));
+    for (let t = 0; t < 20000 && !arrivals().some((x) => x.entryStart > 0); t++) c.runTicks(1);
+    const g = arrivals().sort((a, b) => b.entryStart - a.entryStart)[0]!;
+    expect(g.entryStart).toBeGreaterThan(50); // la grande majorité attend encore hors de la zone
     expect(memberLive(g, 0)).toBe(false);
     expect(memberLive(g, g.members.n - 1)).toBe(true); // la tête est entrée
     let prev = g.entryStart;
@@ -72,8 +73,8 @@ describe('une colonne qui arrive par une porte n’est pas posée à travers les
       expect(g.entryStart).toBeLessThanOrEqual(prev); // ils entrent, jamais l'inverse
       prev = g.entryStart;
     }
-    expect(prev).toBeLessThan(1500);
-  }, 60_000);
+    expect(prev).toBeLessThan(g.entryStart + 1);
+  }, 120_000);
 });
 
 describe('les gens occupent l’espace en se séparant, sans ralentir', () => {

@@ -55,8 +55,11 @@ export type SimLevel = 0 | 1 | 2;
 export interface GroupPlan {
   destination?: Anchor;
   waypoints: Anchor[];
-  onArrival: 'settle' | 'join_target' | 'hold';
+  /** `leave` : les individus sortent de la zone un à un en franchissant la fin de l'itinéraire (dispersion vers une sortie). */
+  onArrival: 'settle' | 'join_target' | 'hold' | 'leave';
   joinTargetId?: Id;
+  /** Clé du rassemblement à rejoindre, résolue à la création du groupe (scénarios). */
+  joinTargetKey?: string;
   /** Attente maximale si aucun itinéraire (ms, 0 = illimitée). */
   patienceMs: number;
   dispersalExit?: Anchor;
@@ -170,6 +173,10 @@ export interface CrowdGroup {
   density: number;
   /** Premier individu déjà entré dans la zone (colonne arrivant par une porte) : les précédents attendent hors de la zone, invisibles. */
   entryStart: number;
+  /** Premier individu déjà sorti de la zone (groupe qui part par une sortie) : les suivants sont hors zone, invisibles. = n tant que personne n'est sorti. */
+  exitStart: number;
+  /** Positions de départ (x,y) d'une colonne qui se forme à partir d'un rassemblement : chaque individu rejoint le début de la route depuis SA place. */
+  startPos: Float32Array | null;
   /** Espace praticable le long de la route (largeur locale de chaque position de la colonne). */
   profile: ColumnProfile | null;
   speedMps: number;

@@ -5,6 +5,7 @@ import { FORCE_CODE, VEHICLE_LABEL } from '../render/GameRenderer';
 import type { CrowdGroup, ForceKind, LogEvent, MoverEntity, UnitStatus } from '../engine/types';
 import type { SimSpeed } from '../engine/clock';
 import type { City } from '../state/types';
+import { clockText, dayPart } from '../game/daylight';
 import type { Vec2 } from '../geo/mercator';
 
 export const mmss = (ms: number) => {
@@ -75,9 +76,10 @@ export function TopBar({ ctrl, cityName, cityId, presetCities, onCity, onToggleS
       </div>
       <div class="situation" data-testid="situation">
         <span>{cityName}</span>
-        <span class="clock" data-testid="sim-clock" title="Temps de simulation écoulé">
-          {mmss(st.simTimeMs)}
+        <span class="clock" data-testid="sim-clock" title={`Heure du jeu (${dayPart(ctrl.clockSec)}) — temps de simulation écoulé : ${mmss(st.simTimeMs)}`}>
+          {clockText(ctrl.clockSec)}
         </span>
+        <small data-testid="day-part">{dayPart(ctrl.clockSec)}</small>
         <div class="speeds" role="group" aria-label="Vitesse de simulation">
           {SPEEDS.map((o) => (
             <button
@@ -345,7 +347,7 @@ export function DetailPanel({ ctrl, orderMode, onOrderMode, onCenter, onClose }:
           <ol class="small" data-testid="detail-history">
             {history.map((h, i) => (
               <li key={i}>
-                <time>{mmss(h.simTimeMs)}</time> {h.text}
+                <time>{clockText(ctrl.dayStartSec + h.simTimeMs / 1000)}</time> {h.text}
                 <br />
                 <em>Pourquoi : {h.why}</em>
               </li>
@@ -357,7 +359,7 @@ export function DetailPanel({ ctrl, orderMode, onOrderMode, onCenter, onClose }:
   );
 }
 
-export function LogPanel({ events }: { events: readonly LogEvent[] }) {
+export function LogPanel({ events, dayStartSec }: { events: readonly LogEvent[]; dayStartSec: number }) {
   const shown = events.filter((e) => e.code !== 'unit.created').slice(-60).reverse();
   return (
     <div class="panel log" data-testid="log-panel">
@@ -365,7 +367,7 @@ export function LogPanel({ events }: { events: readonly LogEvent[] }) {
       <ol>
         {shown.map((e) => (
           <li key={e.id} class={e.level} data-code={e.code}>
-            <time>{mmss(e.simTimeMs)}</time> {e.text}
+            <time>{clockText(dayStartSec + e.simTimeMs / 1000)}</time> {e.text}
             <details class="why">
               <summary>Pourquoi ?</summary>
               <span class="small">

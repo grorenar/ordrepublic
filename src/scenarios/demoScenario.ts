@@ -16,9 +16,13 @@ export interface DemoScenario {
   timeline: ScenarioEvent[];
   /** Place les forces de l'ordre et leurs véhicules (dispositif initial). */
   setup(sim: Sim): void;
-  /** Lieux utilisés (affichés dans l'interface). */
-  places: { plaza: Anchor; admin: Anchor; gatewayWest: Anchor; gatewaySouth: Anchor };
-  /** Durée estimée (s) avant l'arrivée du cortège sur la place, à vitesse de jeu 1×. */
+  /** Lieux utilisés (affichés dans l'interface) : point de rassemblement, administration, portes d'entrée et de sortie de la zone. */
+  places: { plaza: Anchor; admin: Anchor; entries: Anchor[]; exits: Anchor[] };
+  /** Heure du jour (secondes depuis minuit) au début de la partie. */
+  clockStartSec: number;
+  /** Repères du scénario (secondes de jeu depuis le début) : fin des arrivées, départ du cortège, arrivée estimée, dispersion. */
+  milestones: { rallyEndS: number; departS: number; arrivalS: number; endS: number };
+  /** Durée estimée (s) avant l'arrivée du cortège à l'administration, à vitesse de jeu 1×. */
   etaS: number;
   /** Vitesse de jeu suggérée pour regarder le scénario en quelques minutes. */
   suggestedSpeed: 3 | 6;
@@ -71,16 +75,18 @@ export function buildDemoScenario(graph: StreetGraph, opts: { cortegeSize?: numb
   // piquet générique, étiqueté comme tel. Sur la ville schématique (fictive) : le bâtiment voisin est une « administration fictive ».
   const distToPlaza = (c: Vec2) => Math.hypot(c.x - plazaPt.x, c.y - plazaPt.y);
   const reach = zoneBox ? Math.max(zoneBox.halfWidth, zoneBox.halfHeight) * 0.9 : 600;
+  // la manifestation a un vrai trajet : l'administration est choisie à 250–450 m du point de rassemblement (selon la taille de la zone)
+  const targetD = Math.min(450, Math.max(250, reach * 0.55));
   const candidates = graph.obstacles
     .map((o) => ({ o, c: centroid(o.ring) }))
     .map((e) => ({ ...e, d: distToPlaza(e.c) }))
-    .filter((e) => e.d >= 40 && e.d <= reach && (!zoneBox || (Math.abs(e.c.x) <= zoneBox.halfWidth * 0.95 && Math.abs(e.c.y) <= zoneBox.halfHeight * 0.95)));
+    .filter((e) => e.d >= 120 && e.d <= reach && (!zoneBox || (Math.abs(e.c.x) <= zoneBox.halfWidth * 0.95 && Math.abs(e.c.y) <= zoneBox.halfHeight * 0.95)));
   let adminPos = snapPoint({ x: plazaPt.x + 90, y: plazaPt.y + 40 });
   let adminLabel = 'Point de rassemblement (lieu fictif)';
   let adminSource: Anchor['source'] = 'synthetic';
   let adminReal = false;
   if (graph.provenance.source === 'osm') {
-    const admins = candidates.filter((e) => e.o.kind === 'administration').sort((a, b) => a.d - b.d);
+    const admins = candidates.filter((e) => e.o.kind === 'administration').sort((a, b) => Math.abs(a.d - targetD) - Math.abs(b.d - targetD));
     const pick = admins[0];
     if (pick) {
       adminPos = snapPoint(pick.c);
@@ -89,7 +95,7 @@ export function buildDemoScenario(graph: StreetGraph, opts: { cortegeSize?: numb
       adminReal = true;
     }
   } else {
-    const near = candidates.sort((a, b) => a.d - b.d)[0];
+    const near = candidates.sort((a, b) => Math.abs(a.d - targetD) - Math.abs(b.d - targetD))[0];
     if (near) {
       adminPos = snapPoint(near.c);
       adminLabel = 'Administration (fictive)';
@@ -98,72 +104,103 @@ export function buildDemoScenario(graph: StreetGraph, opts: { cortegeSize?: numb
   }
   const admin: Anchor = { id: 'administration', kind: 'place', pos: adminPos, radius: 18, label: adminLabel, source: adminSource };
 
-  // --- portes d'entrée/sortie : nœuds du graphe aux bords ouest et sud
+  // --- portes d'entrée/sortie : nœuds du graphe répartis en couronne autour de la zone (reliés à la place par un itinéraire)
   const nodes = Array.from({ length: graph.nodeCount }, (_, i) => ({ i, x: graph.nodeX[i] as number, y: graph.nodeY[i] as number }));
   const z = opts.zone;
   const inZone = (n: { x: number; y: number }) => !z || (Math.abs(n.x) <= z.halfWidth * 0.95 && Math.abs(n.y) <= z.halfHeight * 0.95);
   const usable = nodes.filter(inZone);
   const pool = usable.length ? usable : nodes;
-  const west = pool.filter((n) => Math.abs(n.y - plazaPt.y) < 250).sort((a, b) => a.x - b.x)[0] ?? pool[0];
-  const south = pool.filter((n) => Math.abs(n.x - plazaPt.x) < 250).sort((a, b) => a.y - b.y)[0] ?? pool[0];
-  const gatewayWest: Anchor = { id: 'porte-ouest', kind: 'node', pos: { x: west!.x, y: west!.y }, radius: 15, label: 'Entrée ouest du secteur', source: 'synthetic' };
-  const gatewaySouth: Anchor = { id: 'porte-sud', kind: 'node', pos: { x: south!.x, y: south!.y }, radius: 15, label: 'Sortie sud du secteur', source: 'synthetic' };
+  const gates: Anchor[] = [];
+  for (let k = 0; k < 8 && gates.length < 6; k++) {
+    const th = (k / 8) * Math.PI * 2 + 0.35;
+    const dx = Math.cos(th);
+    const dy = Math.sin(th);
+    const best = pool
+      .filter((n) => Math.hypot(n.x - plazaPt.x, n.y - plazaPt.y) > 200 && gates.every((g) => Math.hypot(g.pos.x - n.x, g.pos.y - n.y) > 150))
+      .sort((p1, p2) => (p2.x - plazaPt.x) * dx + (p2.y - plazaPt.y) * dy - ((p1.x - plazaPt.x) * dx + (p1.y - plazaPt.y) * dy))[0];
+    if (!best) continue;
+    if (!nav.findRoute({ x: best.x, y: best.y }, plazaPt, 'crowd')) continue;
+    gates.push({ id: `porte-${gates.length + 1}`, kind: 'node', pos: { x: best.x, y: best.y }, radius: 15, label: `Accès ${gates.length + 1} du secteur`, source: 'synthetic' });
+  }
+  if (!gates.length) {
+    const fallback = pool[0] ?? nodes[0];
+    gates.push({ id: 'porte-1', kind: 'node', pos: { x: fallback!.x, y: fallback!.y }, radius: 15, label: 'Accès 1 du secteur', source: 'synthetic' });
+  }
+  const entries = gates.slice(0, Math.min(5, gates.length));
+  // sorties de dispersion : trois accès différents, de préférence autres que les premières entrées
+  const exits = [...gates.slice(entries.length), ...gates].filter((g, i, arr) => arr.indexOf(g) === i).slice(0, Math.min(3, gates.length)).map((g, i) => ({ ...g, id: `sortie-${i + 1}`, label: `Sortie ${i + 1} du secteur` }));
 
-  // --- chronologie : repères d'après l'itinéraire réel du cortège
-  const size = opts.cortegeSize ?? 2500;
-  const route = nav.findRoute(gatewayWest.pos, plaza.pos, 'crowd');
-  const routeLen = route?.length ?? 600;
-  // vitesse effective moyenne observée du cortège (relation densité-vitesse, rues étroites, replanification) ≈ 0,8 m/s
-  const etaS = Math.round(routeLen / 0.8 + 60);
-  // arête à fermer : sur la route, bien devant la tête au moment de la fermeture, et avec un itinéraire de remplacement
+  // --- chronologie : tout est exprimé en secondes de jeu depuis le début (heure du jour = clockStartSec + t)
+  const V = 0.8; // vitesse effective moyenne d'un cortège (relation densité-vitesse, rues étroites, replanification)
+  const total = opts.cortegeSize ?? 2500;
+  const early = Math.min(120, Math.round(total * 0.05));
+  const shares = [0.18, 0.26, 0.2, 0.24, 0.12].slice(0, entries.length);
+  const shareSum = shares.reduce((a, b) => a + b, 0);
+  const arrivals = entries.map((g, k) => {
+    const route = nav.findRoute(g.pos, plazaPt, 'crowd');
+    const spawnS = k * 120;
+    return { g, size: Math.max(20, Math.round(((total - early) * (shares[k] as number)) / shareSum)), spawnS, arriveS: spawnS + (route?.length ?? 500) / V + 120 };
+  });
+  const rallyEndS = Math.max(...arrivals.map((a) => a.arriveS));
+  const departS = Math.max(1800, Math.ceil((rallyEndS + 240) / 300) * 300); // départ à heure ronde, après la dernière arrivée
+  const marchRoute = nav.findRoute(plazaPt, admin.pos, 'crowd');
+  const marchLen = marchRoute?.length ?? 500;
+  const marchS = marchLen / V + 90 + 60;
+  const arrivalS = Math.round(departS + marchS);
+  const endS = arrivalS + 1200;
+  // arête à fermer : sur la route du cortège, bien devant la tête au moment de la fermeture, avec un itinéraire de remplacement
   let closeEdge: number | null = null;
-  if (route) {
+  if (marchRoute) {
     for (const f of [0.55, 0.5, 0.6, 0.45, 0.65, 0.4]) {
-      const idx = route.edges.findIndex((_, i) => (route.edgeStart[i] as number) >= route.length * f);
-      const e = route.edges[Math.max(1, idx)] as number;
+      const idx = marchRoute.edges.findIndex((_, i) => (marchRoute.edgeStart[i] as number) >= marchRoute.length * f);
+      const e = marchRoute.edges[Math.max(1, idx)] as number;
       const st = createEdgeState(graph);
       st.scenarioBlock[e] = 1;
       const probe = new NavContext(graph, DEFAULT_NAV_PARAMS, st);
-      if (probe.findRoute(gatewayWest.pos, plaza.pos, 'crowd')) {
+      if (probe.findRoute(plazaPt, admin.pos, 'crowd')) {
         closeEdge = e;
         break;
       }
     }
   }
 
-  const ms = (s: number) => Math.round(s * 1000);
+  const ms = (x: number) => Math.round(x * 1000);
   const timeline: ScenarioEvent[] = [
-    { id: 'ev-piquet', atMs: 0, kind: 'spawn_group', reason: adminReal ? `piquet de rassemblement devant ${admin.label} prévu au scénario` : 'piquet de rassemblement prévu au scénario (aucune administration repérée dans le secteur : lieu fictif)', spec: { key: 'piquet', label: adminReal ? `Piquet devant ${admin.label}` : 'Piquet de rassemblement', kind: 'static', size: opts.piquetSize ?? 120, origin: admin.pos, anchor: admin, tension: 15 } },
-    {
-      id: 'ev-cortege',
-      atMs: 0,
-      kind: 'spawn_group',
-      reason: `cortège syndical prévu : départ de ${gatewayWest.label} vers ${plaza.label}`,
-      spec: { key: 'cortege', label: 'Cortège syndical', kind: 'march', size, origin: gatewayWest.pos, entry: 'gateway', plan: { destination: plaza, waypoints: [], onArrival: 'settle', patienceMs: 120000 }, tension: 25 },
-    },
+    { id: 'ev-0-piquet', atMs: 0, kind: 'spawn_group', reason: adminReal ? `piquet de rassemblement devant ${admin.label} prévu au scénario` : 'piquet de rassemblement prévu au scénario (aucune administration repérée dans le secteur : lieu fictif)', spec: { key: 'piquet', label: adminReal ? `Piquet devant ${admin.label}` : 'Piquet de rassemblement', kind: 'static', size: opts.piquetSize ?? 120, origin: admin.pos, anchor: admin, tension: 15 } },
+    { id: 'ev-0-rassemblement', atMs: 0, kind: 'spawn_group', reason: `point de rassemblement prévu au scénario : ${plaza.label}, départ du cortège à l’heure indiquée`, spec: { key: 'rassemblement', label: `Rassemblement — ${plaza.label}`, kind: 'static', size: early, origin: plazaPt, anchor: plaza, tension: 10 } },
   ];
-  if (closeEdge !== null) {
-    timeline.push({ id: 'ev-travaux', atMs: ms(etaS * 0.3), kind: 'close_street', edgeId: closeEdge, reason: 'travaux de voirie fictifs : rue fermée par le scénario' });
-    timeline.push({ id: 'ev-fin-travaux', atMs: ms(etaS * 0.75), kind: 'open_street', edgeId: closeEdge, reason: 'fin des travaux fictifs : rue rouverte' });
+  for (const a of arrivals) {
+    timeline.push({
+      id: `ev-arrivee-${a.g.id}`,
+      atMs: ms(a.spawnS),
+      kind: 'spawn_group',
+      reason: `un groupe de manifestants arrive par ${a.g.label} pour rejoindre le point de rassemblement (plan du scénario)`,
+      spec: { key: `groupe-${a.g.id}`, label: `Groupe arrivant par ${a.g.label}`, kind: 'secondary', size: a.size, origin: a.g.pos, entry: 'gateway', plan: { destination: plaza, waypoints: [], onArrival: 'join_target', joinTargetKey: 'rassemblement', patienceMs: 120000 }, tension: 15 },
+    });
   }
   timeline.push({
-    id: 'ev-detachement',
-    atMs: ms(etaS + 90),
-    kind: 'split_group',
-    groupKey: 'cortege',
-    count: Math.max(20, Math.round(size * 0.06)),
-    child: { label: 'Détachement vers le piquet', destination: admin, onArrival: 'join_target', joinTargetKey: 'piquet', key: 'detachement' },
-    reason: `un groupe se détache du cortège pour rejoindre le piquet (${admin.label}, plan du scénario)`,
+    id: 'ev-depart',
+    atMs: ms(departS),
+    kind: 'begin_march',
+    groupKey: 'rassemblement',
+    destination: admin,
+    onArrival: 'join_target',
+    joinTargetKey: 'piquet',
+    label: 'Cortège',
+    reason: `heure de départ du cortège atteinte : il part de ${plaza.label} vers ${admin.label}`,
   });
+  if (closeEdge !== null) {
+    timeline.push({ id: 'ev-travaux', atMs: ms(departS + marchS * 0.3), kind: 'close_street', edgeId: closeEdge, reason: 'travaux de voirie fictifs : rue fermée par le scénario' });
+    timeline.push({ id: 'ev-fin-travaux', atMs: ms(departS + marchS * 0.75), kind: 'open_street', edgeId: closeEdge, reason: 'fin des travaux fictifs : rue rouverte' });
+  }
   timeline.push({
     id: 'ev-fin',
-    atMs: ms(etaS + 420),
-    kind: 'begin_dispersal',
-    groupKey: 'cortege',
-    exit: gatewaySouth,
-    durationMs: ms(240),
+    atMs: ms(endS),
+    kind: 'disperse_sectors',
+    groupKey: 'piquet',
+    exits: exits.map((anchor, i) => ({ anchor, share: [0.4, 0.35, 0.25][i] ?? 0.25 })),
     whenSettled: true,
-    reason: `fin de la manifestation prévue : dispersion progressive vers ${gatewaySouth.label}`,
+    reason: 'fin de la manifestation prévue : dispersion en plusieurs colonnes vers différents secteurs',
   });
 
   const plan: Cause = { kind: 'scenario_plan', refId: 'dispositif', note: 'dispositif initial prévu au scénario' };
@@ -195,5 +232,14 @@ export function buildDemoScenario(graph: StreetGraph, opts: { cortegeSize?: numb
     vehicles.forEach(([vehicle, callsign, crew, r], k) => sim.addVehicle({ vehicle, callsign, crew, pos: around(k + 3, r) }, plan));
   };
 
-  return { id: 'demo-moteur', timeline, setup, places: { plaza, admin, gatewayWest, gatewaySouth }, etaS, suggestedSpeed: etaS > 700 ? 6 : 3 };
+  return {
+    id: 'demo-moteur',
+    timeline,
+    setup,
+    places: { plaza, admin, entries, exits },
+    clockStartSec: 17 * 3600 + 30 * 60,
+    milestones: { rallyEndS, departS, arrivalS, endS },
+    etaS: arrivalS,
+    suggestedSpeed: 6,
+  };
 }

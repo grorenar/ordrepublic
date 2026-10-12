@@ -20,7 +20,7 @@ import { createLayout, extendLayout, snapToWalkable } from './layout';
 import { levelFor, distanceToFoci, selectBlockLevels, usesBlocks } from './lod';
 import { Journal, pushHistory } from './journal';
 import { MoverSystem, deltaText } from './movers';
-import { concatMembers, createMembers, sliceMembers } from './members';
+import { concatMembers, createMembers, permuteMembers, sliceMembers } from './members';
 import { profileFor } from './column';
 import { columnS, computeTargets, evaluateNow, frameEntry, goneCount, routeFrame, updateMembers, type MotionCtx } from './motion';
 import { withParams, type DeepPartial, type SimParams } from './params';
@@ -55,12 +55,16 @@ export type ScenarioEvent =
   | { id: Id; atMs: number; kind: 'close_street'; edgeId: number; reason: string }
   | { id: Id; atMs: number; kind: 'open_street'; edgeId: number; reason: string }
   | { id: Id; atMs: number; kind: 'begin_dispersal'; groupKey: string; exit: Anchor; durationMs: number; reason: string; /** Attend que le groupe soit installé (sinon l'événement est réessayé à chaque tick). */ whenSettled?: boolean }
-  | { id: Id; atMs: number; kind: 'split_group'; groupKey: string; count: number; child: SplitChild; reason: string };
+  | { id: Id; atMs: number; kind: 'split_group'; groupKey: string; count: number; child: SplitChild; reason: string }
+  /** Le rassemblement `groupKey` (installé) se met en marche vers `destination` : chacun part de sa place, la tête en premier. */
+  | { id: Id; atMs: number; kind: 'begin_march'; groupKey: string; destination: Anchor; onArrival?: 'settle' | 'join_target' | 'leave'; joinTargetKey?: string; label?: string; reason: string }
+  /** Le rassemblement `groupKey` se disperse en plusieurs colonnes, chacune vers une sortie différente (parts en fraction de l'effectif). */
+  | { id: Id; atMs: number; kind: 'disperse_sectors'; groupKey: string; exits: Array<{ anchor: Anchor; share: number }>; reason: string; whenSettled?: boolean };
 
 export interface SplitChild {
   label: string;
   destination: Anchor;
-  onArrival?: 'settle' | 'join_target';
+  onArrival?: 'settle' | 'join_target' | 'leave';
   /** Clé du groupe à rejoindre à l'arrivée (onArrival = join_target). */
   joinTargetKey?: string;
   key?: string;
@@ -269,7 +273,8 @@ export class Sim {
 
   /** Effectif logique (personnes encore présentes dans la zone). */
   size(g: CrowdGroup): number {
-    return g.members.n - g.members.activeStart;
+    const hi = g.plan.onArrival === 'leave' ? Math.min(g.members.n, g.exitStart) : g.members.n;
+    return Math.max(0, hi - g.members.activeStart);
   }
 
   totalPeople(): number {
@@ -320,6 +325,7 @@ export class Sim {
     const p = this.params;
     const id = `G-${++this.counter}`;
     const plan: GroupPlan = { waypoints: [], onArrival: 'settle', patienceMs: 0, ...spec.plan };
+    if (plan.joinTargetKey && !plan.joinTargetId) plan.joinTargetId = this.keyToId.get(plan.joinTargetKey);
     const g: CrowdGroup = {
       id,
       label: spec.label,
@@ -342,6 +348,8 @@ export class Sim {
       frontWidth: p.marchFrontWidthMaxM,
       density: p.marchDensity,
       entryStart: 0,
+      exitStart: members.n,
+      startPos: null,
       profile: null,
       speedMps: 0,
       speedCause: 'à l’arrêt',
@@ -375,7 +383,10 @@ export class Sim {
     } else {
       this.planMarch(g, spec.origin, cause);
     }
-    if (from) this.applyBlend(g, from.x, from.y);
+    if (from && g.route && spec.kind !== 'static') {
+      // colonne formée à partir de personnes déjà placées (scission) : chacune part de SA place, la plus proche du départ en premier
+      this.prepareStart(g);
+    } else if (from) this.applyBlend(g, from.x, from.y);
     else this.initPositions(g);
     return id;
   }
@@ -482,7 +493,7 @@ export class Sim {
     g.sCentre = 0;
     this.layoutColumn(g, g.entry === 'gateway' ? 'gateway' : 'centre');
     const dest = g.plan.destination;
-    if (dest) {
+    if (dest && g.plan.onArrival !== 'leave') {
       locate(g.route, g.route.length, loc);
       g.layout = createLayout({ x: loc.x, y: loc.y }, p.staticDensity, g.seed);
       extendLayout(g.layout, n, this.mask, p.staticMaxRadiusM, g.seed);
@@ -511,6 +522,103 @@ export class Sim {
   }
 
   /** Dispersion progressive d'un rassemblement statique vers une sortie (transition T8). */
+  /**
+   * Prépare la mise en marche d'une colonne à partir d'individus déjà placés : ils sont réordonnés par distance au début de la route
+   * (le plus proche en tête), et chacun gardera sa position de départ jusqu'à ce que la colonne l'atteigne — personne n'est déplacé
+   * en ligne droite à travers les bâtiments ni téléporté.
+   */
+  private prepareStart(g: CrowdGroup): void {
+    const route = g.route as Route;
+    const m = g.members;
+    const n = m.n;
+    const sx = route.pts[0] as number;
+    const sy = route.pts[1] as number;
+    const idx = Array.from({ length: n }, (_, i) => i);
+    const d = idx.map((i) => Math.hypot((m.x[i] as number) - sx, (m.y[i] as number) - sy));
+    idx.sort((a, b) => (d[b] as number) - (d[a] as number) || a - b); // le plus lointain d'abord (indice 0 = queue)
+    permuteMembers(m, idx);
+    for (let i = 0; i < n; i++) m.slotOf[i] = n - 1 - i;
+    g.startPos = new Float32Array(2 * n);
+    for (let i = 0; i < n; i++) {
+      g.startPos[2 * i] = m.x[i] as number;
+      g.startPos[2 * i + 1] = m.y[i] as number;
+    }
+    m.px.set(m.x);
+    m.py.set(m.y);
+    m.tx.set(m.x);
+    m.ty.set(m.y);
+    g.needsSnap = false;
+    g.entryStart = 0;
+    g.profile = null;
+    g.sCentre = 0;
+    g.density = this.params.marchDensity;
+    this.layoutColumn(g, 'gateway'); // tête au début de la route : la colonne se forme derrière, c'est-à-dire sur place
+  }
+
+  /**
+   * Mise en marche d'un rassemblement installé (le cortège part de son point de rassemblement). Cause obligatoire.
+   * Retourne faux (et journalise) si aucun itinéraire n'existe.
+   */
+  beginMarch(groupId: Id, dest: { destination: Anchor; onArrival?: 'settle' | 'join_target' | 'leave'; joinTargetKey?: string; label?: string }, cause: Cause): boolean {
+    this.requireCause(cause);
+    const g = this.group(groupId);
+    if (!g || g.phase !== 'settled' || g.kind !== 'static' || !g.layout) return false;
+    const from = g.layout.anchor;
+    const plan: GroupPlan = { waypoints: [], onArrival: dest.onArrival ?? 'settle', joinTargetId: dest.joinTargetKey ? this.keyToId.get(dest.joinTargetKey) : undefined, patienceMs: 120000, destination: dest.destination };
+    const planned = this.planRoute(from, plan);
+    if (!planned) {
+      this.log('warn', 'group.march_failed', `${g.label} : aucun itinéraire vers ${dest.destination.label}, le rassemblement reste en place.`, cause, { type: 'group', id: g.id });
+      return false;
+    }
+    this.ensureEvaluated(g);
+    if (dest.label) g.label = dest.label;
+    g.kind = 'march';
+    g.phase = 'moving';
+    g.plan = plan;
+    g.anchor = null;
+    g.route = planned.route;
+    g.entry = 'inside';
+    g.settleAtS = Infinity;
+    g.layout = null;
+    g.waitingSinceMs = null;
+    g.patienceReported = false;
+    g.lastRouteStateVersion = this.state.version;
+    this.prepareStart(g);
+    const n = g.members.n;
+    if (plan.destination && plan.onArrival !== 'leave') {
+      locate(g.route, g.route.length, loc);
+      g.layout = createLayout({ x: loc.x, y: loc.y }, this.params.staticDensity, g.seed);
+      extendLayout(g.layout, n, this.mask, this.params.staticMaxRadiusM, g.seed);
+      for (let i = 0; i < n; i++) g.members.slotOf[i] = n - 1 - i;
+    }
+    this.log('info', 'group.march_started', `${g.label} : départ du rassemblement vers ${dest.destination.label} (${Math.round(g.route.length)} m).`, cause, { type: 'group', id: g.id }, { routeLengthM: Math.round(g.route.length), size: n });
+    return true;
+  }
+
+  /** Un rassemblement est « terminé » quand il est installé et qu'aucun groupe en marche n'est encore en route pour le rejoindre. */
+  private settledAndJoined(g: CrowdGroup): boolean {
+    if (g.phase !== 'settled') return false;
+    return !this.groups.some((o) => o.id !== g.id && o.plan.joinTargetId === g.id && o.phase !== 'dispersed' && o.phase !== 'settled');
+  }
+
+  /** Dispersion en plusieurs colonnes vers des sorties différentes ; chaque colonne quitte la zone un individu après l'autre. */
+  disperseSectors(groupId: Id, exits: Array<{ anchor: Anchor; share: number }>, cause: Cause): boolean {
+    const g = this.group(groupId);
+    if (!g || g.phase !== 'settled' || !exits.length) return false;
+    const total = this.size(g);
+    const shares = exits.map((e) => Math.max(0.01, e.share));
+    const sum = shares.reduce((a, b) => a + b, 0);
+    let remaining = total;
+    for (let k = 0; k < exits.length - 1; k++) {
+      const count = Math.max(1, Math.min(remaining - 1, Math.round((total * (shares[k] as number)) / sum)));
+      const ex = (exits[k] as { anchor: Anchor }).anchor;
+      const child = this.splitGroup(g.id, count, { label: `${g.label} — sortie ${ex.label}`, destination: ex, onArrival: 'leave' }, cause);
+      if (child) remaining -= count;
+    }
+    const last = (exits[exits.length - 1] as { anchor: Anchor }).anchor;
+    return this.beginMarch(g.id, { destination: last, onArrival: 'leave', label: `${g.label} — sortie ${last.label}` }, cause);
+  }
+
   beginDispersal(groupId: Id, exit: Anchor, durationMs: number, cause: Cause): boolean {
     const g = this.group(groupId);
     if (!g || g.phase !== 'settled' || !g.layout || !g.anchor) return false;
@@ -571,6 +679,7 @@ export class Sim {
       for (let i = 0; i < kept.n; i++) kept.slotOf[i] = kept.n - 1 - i;
     }
     parent.members = kept;
+    if (parent.plan.onArrival !== 'leave') parent.exitStart = kept.n;
     if (!isStatic && parent.route) {
       this.layoutColumn(parent, 'centre');
       parent.settleAtS = Infinity; // recalculé à l'arrivée
@@ -600,6 +709,7 @@ export class Sim {
     const fromY = Float32Array.from(combined.y);
     if (parent.layout) extendLayout(parent.layout, combined.n, this.mask, this.params.staticMaxRadiusM, parent.seed);
     parent.members = combined;
+    if (parent.plan.onArrival !== 'leave') parent.exitStart = combined.n;
     child.members.activeStart = child.members.n;
     child.phase = 'dispersed';
     this.applyBlend(parent, fromX, fromY);
@@ -647,10 +757,14 @@ export class Sim {
     if (this.deferred.length) {
       const still: ScenarioEvent[] = [];
       for (const ev of this.deferred) {
-        if (ev.kind !== 'begin_dispersal') continue;
-        const g = this.groupByKey(ev.groupKey);
-        if (g && g.phase === 'settled') this.beginDispersal(g.id, ev.exit, ev.durationMs, { kind: 'scenario_event', refId: ev.id, note: ev.reason });
-        else if (g && g.phase !== 'dispersed' && g.phase !== 'dispersing') still.push(ev);
+        const g = 'groupKey' in ev ? this.groupByKey(ev.groupKey) : undefined;
+        if (ev.kind === 'begin_dispersal') {
+          if (g && g.phase === 'settled') this.beginDispersal(g.id, ev.exit, ev.durationMs, { kind: 'scenario_event', refId: ev.id, note: ev.reason });
+          else if (g && g.phase !== 'dispersed' && g.phase !== 'dispersing') still.push(ev);
+        } else if (ev.kind === 'disperse_sectors') {
+          if (g && this.settledAndJoined(g)) this.disperseSectors(g.id, ev.exits, { kind: 'scenario_event', refId: ev.id, note: ev.reason });
+          else if (g && g.phase !== 'dispersed') still.push(ev);
+        }
       }
       this.deferred = still;
     }
@@ -678,6 +792,17 @@ export class Sim {
           if (g) this.splitGroup(g.id, ev.count, ev.child, cause);
           break;
         }
+        case 'begin_march': {
+          const g = this.groupByKey(ev.groupKey);
+          if (g) this.beginMarch(g.id, { destination: ev.destination, onArrival: ev.onArrival, joinTargetKey: ev.joinTargetKey, label: ev.label }, cause);
+          break;
+        }
+        case 'disperse_sectors': {
+          const g = this.groupByKey(ev.groupKey);
+          if (g && (!ev.whenSettled || this.settledAndJoined(g))) this.disperseSectors(g.id, ev.exits, cause);
+          else if (g && ev.whenSettled) this.deferred.push(ev);
+          break;
+        }
       }
     }
   }
@@ -685,6 +810,7 @@ export class Sim {
   // ------------------------------------------------------------------ groupes
 
   private updateGroup(g: CrowdGroup): void {
+    if (g.plan.onArrival !== 'leave') g.exitStart = g.members.n; // l'effectif peut changer (scission, jonction)
     const p = this.params;
     const dt = p.tickMs / 1000;
     if (g.phase === 'dispersing') {
@@ -713,7 +839,11 @@ export class Sim {
     }
     const route = g.route;
     const len = route.length;
-    const arriving = g.sCentre + g.columnLength / 2 >= len;
+    const leaving = g.plan.onArrival === 'leave';
+    const arriving = !leaving && g.sCentre + g.columnLength / 2 >= len;
+    if (!leaving) g.exitStart = g.members.n;
+    // colonne formée depuis un rassemblement : une fois la queue partie, les positions de départ ne servent plus
+    if (g.startPos && g.sCentre - g.columnLength / 2 > 12) g.startPos = null;
 
     // validité de la suite de l'itinéraire (tête de colonne → destination)
     if (!arriving && (this.state.version !== g.lastRouteStateVersion || (g.phase === 'waiting' && this.tick - g.lastRetryTick >= p.waitRetryTicks))) {
@@ -743,6 +873,19 @@ export class Sim {
     // bloqué : la TÊTE reste contre l'obstacle, la colonne se tasse derrière — comme un piquet, pas une file étirée
     else if (g.phase === 'waiting' && !arriving) this.layoutColumn(g, 'head');
 
+    // sortie de la zone : chaque individu disparaît quand il franchit la fin de l'itinéraire (sortie), un à un
+    if (leaving && g.profile) {
+      const n = g.members.n;
+      const aHead = g.profile.area(g.sCentre + g.columnLength / 2);
+      const beyond = aHead - g.profile.area(len + this.params.entryBufferM);
+      g.exitStart = beyond > 0 ? Math.max(0, Math.min(n, Math.ceil(n - 0.5 - g.density * beyond))) : n;
+      if (g.exitStart <= g.members.activeStart) {
+        g.phase = 'dispersed';
+        g.members.activeStart = g.members.n;
+        this.log('info', 'group.dispersed', `${g.label} : tout le monde a quitté la zone par ${g.plan.destination?.label ?? 'la sortie'}.`, { kind: 'transition', refId: g.id, note: 'dernier individu sorti de la zone' }, { type: 'group', id: g.id });
+        return;
+      }
+    }
     // arrivée : la tête atteint la fin de la route ; les individus s'absorbent un à un
     if (arriving && g.settleAtS === Infinity && g.plan.destination) {
       this.beginArrival(g);

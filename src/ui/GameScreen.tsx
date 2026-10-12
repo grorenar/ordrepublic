@@ -4,6 +4,7 @@ import { PRESET_CITIES } from '../geo/cities';
 import { DEFAULT_ZOOM, MAP_PROVIDERS, type MapProviderId } from '../config/mapConfig';
 import type { Settings } from '../config/settings';
 import { GameController } from '../game/controller';
+import { darkness } from '../game/daylight';
 import { provideWorld, type WorldKind } from '../game/world';
 import { LiveLoadError, indexedDbCache, loadZoneGraph } from '../nav/osm/live';
 import type { StreetGraph } from '../nav/graph';
@@ -230,6 +231,7 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
       const centre = frameRef.current.toMeters({ lng: v.lng, lat: v.lat });
       c.setView(centre, Math.hypot(v.width, v.height) / 2 / pixelsPerMeter(v.lat, v.zoom));
       c.advance(dt);
+      renderer.darkness = darkness(c.clockSec);
     };
     renderer.start();
     return () => {
@@ -650,7 +652,7 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
                 setRev((r) => r + 1);
               }}
             />
-            <LogPanel events={ctrl.sim.journal.events} />
+            <LogPanel events={ctrl.sim.journal.events} dayStartSec={ctrl.dayStartSec} />
           </>
         )}
       </aside>

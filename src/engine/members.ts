@@ -29,6 +29,27 @@ export function createMembers(n: number, seed: number): MemberSet {
 }
 
 /** Octets utilisés par les tableaux d'un MemberSet (hors objet JS). */
+/** Réordonne les individus : le nouvel individu `k` est l'ancien `order[k]` (toutes les propriétés suivent la personne). */
+export function permuteMembers(m: MemberSet, order: ArrayLike<number>): void {
+  const f32 = (a: Float32Array) => {
+    const b = Float32Array.from(a);
+    for (let k = 0; k < m.n; k++) a[k] = b[order[k] as number] as number;
+  };
+  f32(m.x);
+  f32(m.y);
+  f32(m.px);
+  f32(m.py);
+  f32(m.tx);
+  f32(m.ty);
+  f32(m.lat);
+  const seeds = Uint32Array.from(m.seed);
+  const roles = Uint8Array.from(m.role);
+  for (let k = 0; k < m.n; k++) {
+    m.seed[k] = seeds[order[k] as number] as number;
+    m.role[k] = roles[order[k] as number] as number;
+  }
+}
+
 export function memberBytes(m: MemberSet): number {
   return m.x.byteLength * 6 + m.lat.byteLength + m.seed.byteLength + m.role.byteLength + m.slotOf.byteLength;
 }

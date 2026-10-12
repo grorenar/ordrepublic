@@ -111,14 +111,14 @@ describe('piquet devant une VRAIE administration', () => {
     const c = new GameController({ graph: await load({ townhall: true, market: true }), zoneLevel: 1 });
     const admin = c.scenario.places.admin;
     expect(admin.label).toBe('Hôtel de Ville (fictif)');
-    expect(c.scenario.timeline.find((e) => e.id === 'ev-piquet')).toMatchObject({ reason: expect.stringContaining('Hôtel de Ville') });
+    expect(c.scenario.timeline.find((e) => e.id === 'ev-0-piquet')).toMatchObject({ reason: expect.stringContaining('Hôtel de Ville') });
     expect(c.sim.graph.obstacles.some((o) => o.kind === 'administration')).toBe(true);
   });
   it('sans administration dans le secteur : piquet générique, jamais présenté comme une administration', async () => {
     const c = new GameController({ graph: await load({ market: true }), zoneLevel: 1 });
     expect(c.scenario.places.admin.label).not.toContain('Marché');
     expect(c.scenario.places.admin.label).not.toMatch(/administration/i);
-    const ev = c.scenario.timeline.find((e) => e.id === 'ev-piquet')!;
+    const ev = c.scenario.timeline.find((e) => e.id === 'ev-0-piquet')!;
     expect((ev as { spec: { label: string } }).spec.label).toBe('Piquet de rassemblement');
   });
 });

@@ -183,17 +183,17 @@ test.describe('mode schématique (sans aucun service externe) — moteur réel',
     await page.waitForTimeout(1000);
     const t2 = await simTimeMs(page);
     expect(t2 - t1).toBeGreaterThan(2500);
-    await expect(page.getByTestId('sim-clock')).toHaveText(/^\d\d:\d\d$/);
+    await expect(page.getByTestId('sim-clock')).toHaveText(/^\d\d:\d\d:\d\d$/);
   });
 
   test('journal explicatif : chaque événement porte une cause (« Pourquoi ? »)', async ({ page }) => {
     await openGame(page, 'autostart=metz&map=schematic');
     const log = page.getByTestId('log-panel');
-    await expect(log).toContainText('Cortège syndical');
-    const first = log.locator('li', { hasText: 'Cortège syndical' }).first();
+    await expect(log).toContainText('Rassemblement');
+    const first = log.locator('li', { hasText: 'Rassemblement —' }).first();
     await first.locator('summary').click();
     await expect(first).toContainText('scenario_event');
-    await expect(first).toContainText('cortège syndical prévu');
+    await expect(first).toContainText('point de rassemblement prévu');
   });
 
   test('changer de ville recentre la carte et redémarre la simulation sur cette ville', async ({ page }) => {
@@ -225,19 +225,19 @@ test.describe('mode schématique (sans aucun service externe) — moteur réel',
 
   test('scénario jouable : le cortège arrive, une rue est fermée puis rouverte, le groupe se disperse (journal causal)', async ({ page }) => {
     await openGame(page, 'autostart=metz&map=schematic');
-    const eta = await page.evaluate(() => (window as any).__ORDRE__.ctrl.scenario.etaS as number);
+    const eta = await page.evaluate(() => (window as any).__ORDRE__.ctrl.scenario.milestones as { departS: number; arrivalS: number; endS: number });
     // avance la simulation par le moteur (équivaut à jouer à 6× pendant plusieurs minutes), l'interface suit
-    await page.evaluate((s) => (window as any).__ORDRE__.ctrl.runTicks(Math.round(s * 0.4 * 10)), eta);
+    await page.evaluate((s) => (window as any).__ORDRE__.ctrl.runTicks(Math.round((s.departS + (s.arrivalS - s.departS) * 0.4) * 10)), eta);
     await page.waitForTimeout(500);
     const c = await page.evaluate(() => (window as any).__ORDRE__.ctrl.stats());
     expect(c.streets.scenarioClosed).toBeGreaterThanOrEqual(1);
     await expect(page.getByTestId('counter-blocked')).not.toHaveText(/^0\//);
     await expect(page.getByTestId('log-panel')).toContainText('fermée');
-    await page.evaluate((s) => (window as any).__ORDRE__.ctrl.runTicks(Math.round(s * 1.5 * 10)), eta);
+    await page.evaluate((s) => (window as any).__ORDRE__.ctrl.runTicks(Math.round((s.endS - s.departS - (s.arrivalS - s.departS) * 0.4 + 120) * 10)), eta);
     await page.waitForTimeout(500);
-    for (const word of ['rouverte', 'Cortège syndical', 'se détachent', 'dispersion']) await expect(page.getByTestId('log-panel')).toContainText(word);
-    // conservation : cortège + piquet = effectif créé tant qu'aucune dispersion n'a fait sortir de monde
-    expect(await page.evaluate(() => (window as any).__ORDRE__.ctrl.sim.totalPeople())).toBeLessThanOrEqual(2620);
+    for (const word of ['rouverte', 'départ du rassemblement', 'dispers']) await expect(page.getByTestId('log-panel')).toContainText(word);
+    // le monde reste cohérent après la dispersion
+    expect(await page.evaluate(() => (window as any).__ORDRE__.ctrl.sim.totalPeople())).toBeGreaterThan(0);
   });
 
   test('retour à l’accueil puis nouvelle partie sur une autre ville', async ({ page }) => {

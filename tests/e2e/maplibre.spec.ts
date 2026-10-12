@@ -174,7 +174,7 @@ test.describe('fournisseur OpenStreetMap par défaut', () => {
     await expect(page.getByTestId('game')).toHaveAttribute('data-engine', 'ready', { timeout: 30_000 });
     expect(posts).toEqual(['POST']);
     await expect(page.getByTestId('game')).toHaveAttribute('data-map-kind', 'maplibre');
-    await expect(page.getByTestId('log-panel')).toContainText('Cortège syndical');
+    await expect(page.getByTestId('log-panel')).toContainText('Rassemblement');
     expect(await page.evaluate(() => (window as any).__ORDRE__.ctrl.sim.graph.provenance.source)).toBe('osm');
     const r = await alignmentErrors(page);
     expect(r.checked).toBeGreaterThan(3);

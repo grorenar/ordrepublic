@@ -37,24 +37,28 @@ describe('accès saturés : le cortège emprunte un autre accès', () => {
   });
 });
 
-describe('le rassemblement ne s’installe et la dispersion ne commence que lorsque TOUS sont arrivés', () => {
-  it('au début de la dispersion, personne n’est loin de son créneau (aucun saut)', () => {
+describe('la dispersion ne commence que lorsque TOUS sont arrivés', () => {
+  it('au moment de la dispersion par secteurs, personne ne saute d’un tick à l’autre (aucune téléportation)', () => {
     const graph = buildSchematicGraph({ lng: 6.1757, lat: 49.1193 }, 1400, 1050);
     const c = new GameController({ graph, seed: 7 });
-    let atDispersal: number | null = null;
-    for (let t = 0; t < 30000 && atDispersal === null; t++) {
+    const prev = new Map<string, [number, number]>();
+    let watching = 0;
+    let worst = 0;
+    for (let t = 0; t < 60000 && watching < 80; t++) {
       c.runTicks(1);
-      const g = c.sim.group('G-1');
-      if (g && g.phase === 'dispersing' && g.layout) {
-        let worst = 0;
-        for (let i = g.members.activeStart; i < g.members.n; i++) {
-          const slot = g.members.slotOf[i] as number;
-          worst = Math.max(worst, Math.hypot((g.members.x[i] as number) - (g.layout.pts[2 * slot] as number), (g.members.y[i] as number) - (g.layout.pts[2 * slot + 1] as number)));
+      const split = c.sim.groups.some((g) => g.label.includes('— sortie'));
+      if (split && watching++ === 0) prev.clear(); // la scission réaffecte les indices : on repart de zéro
+      for (const g of c.sim.groups) {
+        const m = g.members;
+        for (let i = Math.max(m.activeStart, g.entryStart); i < Math.min(m.n, g.exitStart); i += 7) {
+          const k = `${g.id}:${i}`;
+          const p = prev.get(k);
+          if (split && p) worst = Math.max(worst, Math.hypot((m.x[i] as number) - p[0], (m.y[i] as number) - p[1]));
+          prev.set(k, [m.x[i] as number, m.y[i] as number]);
         }
-        atDispersal = worst;
       }
     }
-    expect(atDispersal).not.toBeNull();
-    expect(atDispersal as number).toBeLessThan(12); // chacun est déjà sur son créneau, pas téléporté
+    expect(watching).toBeGreaterThan(0);
+    expect(worst).toBeLessThan(3);
   }, 200_000);
 });

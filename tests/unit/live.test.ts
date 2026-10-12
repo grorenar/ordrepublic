@@ -80,8 +80,8 @@ describe('chargement à la demande du graphe OSM d’un secteur', () => {
     const { graph } = await loadZoneGraph(metz, half, 'Metz', { fetchFn: okFetch([]) as typeof fetch, cache: null });
     const c = new GameController({ graph, zoneLevel: 1 });
     expect(c.sim.units.length).toBe(8);
-    c.runTicks((c.scenario.etaS + 120) * 10);
+    c.runTicks((c.scenario.milestones.arrivalS + 120) * 10);
     expect(c.sim.totalPeople()).toBeGreaterThan(0);
-    expect(c.sim.journal.events.some((e) => e.code === 'group.arriving')).toBe(true);
+    expect(c.sim.journal.events.some((e) => e.code === 'group.march_started')).toBe(true);
   }, 60_000);
 });

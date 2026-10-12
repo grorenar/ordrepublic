@@ -22,14 +22,15 @@ export interface Box {
 export function groupBox(g: CrowdGroup, margin = 10): Box | null {
   const m = g.members;
   const lo = Math.max(m.activeStart, g.entryStart);
-  const n = m.n - lo;
+  const hi = Math.min(m.n, g.exitStart);
+  const n = hi - lo;
   if (n <= 0) return null;
   const step = Math.max(1, Math.floor(n / 96));
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
   let maxY = -Infinity;
-  for (let i = lo; i < m.n; i += step) {
+  for (let i = lo; i < hi; i += step) {
     const x = m.x[i] as number;
     const y = m.y[i] as number;
     if (x < minX) minX = x;
@@ -44,7 +45,7 @@ const inBox = (b: Box, p: Vec2) => p.x >= b.minX && p.x <= b.maxX && p.y >= b.mi
 
 /** Un individu dont le bloc est en N0 (position périmée, hors du foyer) n'est jamais affiché ni sélectionnable. */
 export function memberLive(g: CrowdGroup, i: number): boolean {
-  if (i < g.entryStart) return false; // pas encore entré dans la zone
+  if (i < g.entryStart || i >= g.exitStart) return false; // pas encore entré dans la zone, ou déjà sorti
   const bl = g.blocks;
   if (bl) return (bl.level[Math.floor(i / bl.size)] as number) > 0;
   return g.level > 0;

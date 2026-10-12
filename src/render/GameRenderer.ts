@@ -94,6 +94,8 @@ export class GameRenderer {
   /** Diagnostic : couches à ne pas dessiner (zone, streets, crowd, vehicles, units, routes). */
   readonly skip = new Set<string>();
   hover: EntityRef | null = null;
+  /** Obscurité (0 jour … 1 nuit) : voile bleuté sous les pions, qui restent bien visibles. */
+  darkness = 0;
   /** Fond aérien : les individus sont cerclés d'un liseré sombre pour rester lisibles sur la photo. */
   aerial = false;
   /** Mode « Aller ici » actif : curseur de ciblage dessiné par l'interface. */
@@ -274,6 +276,10 @@ export class GameRenderer {
     const lod = lodForZoom(view.zoom);
     const on = (k: string) => !this.skip.has(k);
     const alpha = c.alpha;
+    if (this.darkness > 0.01) {
+      this.ctx.fillStyle = `rgba(6,12,38,${(0.55 * this.darkness).toFixed(3)})`;
+      this.ctx.fillRect(0, 0, this.cssW, this.cssH);
+    }
     if (on('zone')) this.drawZone(t);
     if (on('streets')) this.drawStreets(c, t, lod);
     if (on('routes')) this.drawRoutes(c, alpha, t);
@@ -462,12 +468,12 @@ export class GameRenderer {
     const { ctx } = this;
     const groups = c.sim.groups.filter((g) => g.phase !== 'dispersed');
     let total = 0;
-    for (const g of groups) total += g.members.n - g.members.activeStart;
+    for (const g of groups) total += Math.min(g.members.n, g.exitStart) - g.members.activeStart;
     if (total === 0) return;
     const dotR = Math.max(1.2, Math.min(4.2, 0.32 * this.ppm));
     for (const g of groups) {
       const m = g.members;
-      const n = m.n - m.activeStart;
+      const n = Math.min(m.n, g.exitStart) - m.activeStart;
       if (n <= 0) continue;
       const box = groupBox(g, 0);
       if (!box) continue;
@@ -517,7 +523,8 @@ export class GameRenderer {
       let drawn = 0;
       const first = Math.max(m.activeStart, g.entryStart) + ((g.seed >>> 0) % stride);
       const bl = g.blocks;
-      for (let i = first; i < m.n; i += stride) {
+      const lastI = Math.min(m.n, g.exitStart);
+      for (let i = first; i < lastI; i += stride) {
         if (bl ? (bl.level[Math.floor(i / bl.size)] as number) === 0 : g.level === 0) continue;
         const x = (m.px[i] as number) + ((m.x[i] as number) - (m.px[i] as number)) * alpha;
         const y = (m.py[i] as number) + ((m.y[i] as number) - (m.py[i] as number)) * alpha;

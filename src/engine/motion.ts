@@ -70,6 +70,7 @@ function marchTargets(g: CrowdGroup, c: MotionCtx, from: number, to: number): vo
   const end = lay ? routeFrame(g, c, route, true) : null;
   const cursor = new RouteCursor(route);
   const prof = profileFor(g, c.graph, c.state, c.params);
+  const startF = g.startPos ? routeFrame(g, c, route, false) : null;
   // l'aire de la colonne entre la tête et l'individu i vaut (n − i − ½) / densité : chaque individu est placé là où l'espace
   // praticable LOCAL le permet (la queue garde sa largeur tant qu'elle n'est pas entrée dans la rue étroite)
   const aHead = prof.area(g.sCentre + g.columnLength / 2);
@@ -86,6 +87,17 @@ function marchTargets(g: CrowdGroup, c: MotionCtx, from: number, to: number): vo
       const f = dist > 1e-6 ? Math.min(1, (s - len) / dist) : 1;
       m.tx[i] = e.x + (sx - e.x) * f;
       m.ty[i] = e.y + (sy - e.y) * f;
+      continue;
+    }
+    if (s < 0 && g.startPos && startF) {
+      // le cortège se forme depuis un rassemblement : chacun rejoint le début de la route depuis SA place, quand la colonne l'atteint
+      const sx = g.startPos[2 * i] as number;
+      const sy = g.startPos[2 * i + 1] as number;
+      const e = frameEntry(startF, m.lat[i] as number);
+      const dist = Math.hypot(e.x - sx, e.y - sy);
+      const f = dist > 1e-6 ? Math.max(0, Math.min(1, (s + dist) / dist)) : 1;
+      m.tx[i] = sx + (e.x - sx) * f;
+      m.ty[i] = sy + (e.y - sy) * f;
       continue;
     }
     cursor.at(s, cur);

@@ -39,6 +39,8 @@ export class GameController {
   readonly scenario: DemoScenario;
   readonly picker: SelectionIndex;
   selection: EntityRef[] = [];
+  /** Heure du jour (secondes depuis minuit) au début de la partie. */
+  readonly dayStartSec: number;
   zoneLevel: number;
   /** Derniers ordres refusés ou acceptés (affichés par l'interface). */
   lastOrders: OrderResult[] = [];
@@ -50,6 +52,7 @@ export class GameController {
     const zone = ZONE_LEVELS[this.zoneLevel] ?? ZONE_LEVELS[0]!;
     this.scenario = o.scenario ?? buildDemoScenario(o.graph, { zone });
     this.sim = new Sim({ graph: o.graph, seed: o.seed ?? 20240607, params: o.params, timeline: this.scenario.timeline, zone });
+    this.dayStartSec = this.scenario.clockStartSec;
     this.scenario.setup(this.sim);
     this.picker = new SelectionIndex(this.sim);
     this.clock.setSpeed(1);
@@ -85,6 +88,11 @@ export class GameController {
   runTicks(ticks: number): void {
     this.updateFoci();
     this.sim.run(ticks);
+  }
+
+  /** Heure du jour (secondes depuis minuit) correspondant au temps de simulation courant. */
+  get clockSec(): number {
+    return this.dayStartSec + this.sim.timeMs / 1000;
   }
 
   // ------------------------------------------------------------------ foyer d'attention
@@ -204,7 +212,7 @@ export class GameController {
       if (!g) return null;
       const m = g.members;
       const lo = Math.max(m.activeStart, g.entryStart);
-      const n = m.n - lo;
+      const n = Math.min(m.n, g.exitStart) - lo;
       if (n <= 0) return null;
       const i = lo + Math.floor(n / 2);
       return { x: m.x[i] as number, y: m.y[i] as number };
