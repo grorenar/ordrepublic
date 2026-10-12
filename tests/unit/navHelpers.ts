@@ -15,6 +15,8 @@ export interface GridOpts {
   obstacles?: Obstacle[];
   spaces?: OpenSpace[];
   /** Drapeaux supplémentaires par arête (tunnel, pont…), selon les nœuds a et b. */
+  /** Voies sans circulation motorisée (piétonnes). */
+  noMotor?: boolean;
   extraFlags?: (a: Vec2, b: Vec2) => number;
   origin?: { lng: number; lat: number };
 }
@@ -29,7 +31,7 @@ export function gridGraph(o: GridOpts): StreetGraph {
   const edges: RawEdge[] = [];
   const add = (a: number, b: number) => {
     if (rng() < (o.holes ?? 0)) return;
-    let flags = EdgeFlag.Foot | EdgeFlag.Motor | (o.extraFlags ? o.extraFlags(nodes[a] as Vec2, nodes[b] as Vec2) : 0);
+    let flags = EdgeFlag.Foot | (o.noMotor ? 0 : EdgeFlag.Motor) | (o.extraFlags ? o.extraFlags(nodes[a] as Vec2, nodes[b] as Vec2) : 0);
     if (rng() < (o.oneways ?? 0)) flags |= EdgeFlag.Oneway;
     edges.push({ a, b, shape: [nodes[a] as Vec2, nodes[b] as Vec2], cls: o.cls ?? EdgeClass.Residential, flags, width: o.width ?? 8 });
   };

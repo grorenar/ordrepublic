@@ -4,7 +4,7 @@ import { EdgeGrid, nearestEdge, type EdgeProjection } from './spatialGrid';
 import { MinHeap } from './heap';
 import { buildRoute, type NavMode, type Route } from './route';
 import type { EdgeState } from './streetState';
-import type { NavParams } from './params';
+import { FOOTWAY_CLASSES, type NavParams } from './params';
 
 /** Contexte de navigation : graphe + index + paramètres + état dynamique (+ tampons réutilisés). */
 /** Zone circulaire (m) dans laquelle les piétons peuvent traverser une foule dense (arrivée à destination). */
@@ -41,7 +41,7 @@ export class NavContext {
   canTraverse(e: number, forward: boolean, mode: NavMode): boolean {
     const f = this.graph.edgeFlags[e] as number;
     if (mode === 'vehicle' || mode === 'emergency') {
-      if (!(f & EdgeFlag.Motor)) return false;
+      if (!(f & EdgeFlag.Motor)) return this.footwayVehicleSpeed(e) > 0;
       // avertisseurs actifs : sens interdits permis (circulation à contresens)
       if (mode === 'vehicle') {
         if (f & EdgeFlag.Oneway && !forward) return false;
@@ -50,6 +50,20 @@ export class NavContext {
       return (this.params.speedVehicleByClass[this.graph.edgeClass[e] as number] ?? 0) > 0;
     }
     return (f & EdgeFlag.Foot) !== 0;
+  }
+
+  /** Vitesse nominale (m/s) d'un véhicule sur l'arête : classe de voie, ou voie piétonne assez large ; 0 = impraticable. */
+  vehicleSpeedOn(e: number): number {
+    const f = this.graph.edgeFlags[e] as number;
+    if (f & EdgeFlag.Motor) return this.params.speedVehicleByClass[this.graph.edgeClass[e] as number] ?? 0;
+    return this.footwayVehicleSpeed(e);
+  }
+
+  private footwayVehicleSpeed(e: number): number {
+    const p = this.params;
+    if (!FOOTWAY_CLASSES.has(this.graph.edgeClass[e] as number)) return 0;
+    const w = this.state ? Math.max(this.state.walkWidth[e] as number, this.graph.edgeWidth[e] as number) : (this.graph.edgeWidth[e] as number);
+    return w >= p.vehicleFootwayMinWidthM ? p.vehicleFootwaySpeedMps : 0;
   }
 
   /** Milieu d'une arête (pour la zone d'arrivée). */
@@ -72,7 +86,7 @@ export class NavContext {
     let speed: number;
     let mult = 1;
     if (mode === 'vehicle' || mode === 'emergency') {
-      speed = p.speedVehicleByClass[cls] ?? 0;
+      speed = this.vehicleSpeedOn(e);
       if (speed <= 0) return Infinity;
       if (mode === 'emergency') speed *= p.emergencySpeedFactor;
     } else {

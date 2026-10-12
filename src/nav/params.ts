@@ -9,6 +9,10 @@ export interface NavParams {
   /** Multiplicateurs de coût pour les cortèges (préfèrent rues et places). */
   /** Un véhicule avec avertisseurs roule jusqu'à ce multiple de la vitesse de sa classe de voie (limites non respectées). */
   emergencySpeedFactor: number;
+  /** Largeur (m) à partir de laquelle une voie piétonne (rue piétonne, chemin, sentier) est praticable par un véhicule. */
+  vehicleFootwayMinWidthM: number;
+  /** Vitesse (m/s) d'un véhicule sur une voie piétonne (pas à pas, au milieu des piétons). */
+  vehicleFootwaySpeedMps: number;
   crowdPenaltyFootway: number;
   /** Largeur praticable (m) en dessous de laquelle une rue est pénalisée pour un cortège (surcoût proportionnel au manque). */
   crowdPreferredWidthM: number;
@@ -39,6 +43,9 @@ export interface NavParams {
 
 import { EdgeClass } from './graph';
 
+/** Classes piétonnes qu'un véhicule peut emprunter si elles sont assez larges (jamais les escaliers). */
+export const FOOTWAY_CLASSES: ReadonlySet<number> = new Set([EdgeClass.Pedestrian, EdgeClass.Footway, EdgeClass.Path, EdgeClass.Track]);
+
 export const DEFAULT_NAV_PARAMS: NavParams = {
   speedFootMps: 1.4,
   speedVehicleByClass: {
@@ -51,6 +58,8 @@ export const DEFAULT_NAV_PARAMS: NavParams = {
     [EdgeClass.Service]: 3,
   },
   emergencySpeedFactor: 1.8,
+  vehicleFootwayMinWidthM: 4,
+  vehicleFootwaySpeedMps: 3,
   crowdPenaltyFootway: 0.5,
   crowdPreferredWidthM: 8,
   crowdNarrowPenalty: 1.2,

@@ -183,7 +183,7 @@ export class MoverSystem {
     const st = this.d.state;
     // limite de vitesse de la classe de voie (les avertisseurs permettent de la dépasser, jusqu'à un plafond)
     if (vehicle) {
-      const lim = this.d.params.nav.speedVehicleByClass[this.d.graph.edgeClass[edge] as number] ?? 4;
+      const lim = this.d.nav.vehicleSpeedOn(edge) || 4;
       vmax = emergency ? Math.min(p.vehicleEmergencySpeedMps, lim * this.d.params.nav.emergencySpeedFactor) : Math.min(p.vehicleSpeedMps, lim);
     }
     let factor = 1;

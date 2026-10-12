@@ -96,6 +96,8 @@ Contrôles de cohérence appliqués à la création d’un `Sim` (`validateSimPa
 | `nav.crowdPreferredWidthM` | m | 8 | Largeur praticable en dessous de laquelle une rue est pénalisée pour un cortège. | Les cortèges préfèrent les rues larges ; une ruelle reste possible si c’est nécessaire. |
 | `nav.crowdNarrowPenalty` | multiple | 1.2 | Surcoût maximal (proportionnel au manque de largeur) pour un cortège dans une rue très étroite. | 0 : aucune préférence de largeur. |
 | `nav.emergencySpeedFactor` | multiple | 1.8 | Multiple de la vitesse de la classe de voie atteint par un véhicule avec avertisseurs. | Itinéraires et vitesses des véhicules d’urgence ; les sens interdits sont aussi permis. |
+| `nav.vehicleFootwayMinWidthM` | m | 4 | Largeur à partir de laquelle une voie piétonne (rue piétonne, chemin) est praticable par un véhicule. | Plus bas : les véhicules coupent par davantage de voies piétonnes ; jamais les escaliers. |
+| `nav.vehicleFootwaySpeedMps` | m/s | 3 | Vitesse d’un véhicule sur une voie piétonne. | Coût d’itinéraire et vitesse sur ces voies (les avertisseurs la multiplient). |
 | `nav.crowdPenaltyFootway` | multiple | 0.5 | Surcoût pour un cortège empruntant un chemin piéton étroit. | Les cortèges préfèrent rues et places. |
 | `nav.crowdPenaltySteps` | multiple | 2 | Surcoût pour un cortège empruntant des escaliers. | Les cortèges évitent les escaliers sauf nécessité. |
 | `nav.maxDetourRatio` | ratio (∞ = aucun) | ∞ | Détour maximal accepté par rapport à l’itinéraire direct. | Infini par défaut : aucun facteur ne peut empêcher un itinéraire alternatif valide. |
