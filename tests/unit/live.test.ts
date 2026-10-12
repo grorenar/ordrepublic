@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LiveLoadError, loadZoneGraph, zoneKey, type ZoneCache } from '../../src/nav/osm/live';
+import { LiveLoadError, loadZoneGraph, parseOverpassStatus, zoneKey, type ZoneCache } from '../../src/nav/osm/live';
 import { GameController } from '../../src/game/controller';
 import { overpassGrid } from '../fixtures/overpassGrid';
 
@@ -35,7 +35,7 @@ describe('chargement à la demande du graphe OSM d’un secteur', () => {
   it('HTTP 429 : jusqu’à 10 tentatives (services alternés) avant l’échec, message explicite avec le nombre de tentatives', async () => {
     const urls: string[] = [];
     const f = (async (u: RequestInfo | URL) => { urls.push(String(u)); return new Response('', { status: 429 }); }) as typeof fetch;
-    const err = await loadZoneGraph(metz, half, 'Metz', { fetchFn: f, cache: null, retryDelayMs: 1 }).catch((e) => e);
+    const err = await loadZoneGraph(metz, half, 'Metz', { fetchFn: f, cache: null, retryDelayMs: 1, useStatus: false }).catch((e) => e);
     expect(err).toBeInstanceOf(LiveLoadError);
     expect(err.kind).toBe('overloaded');
     expect(err.message).toMatch(/10 tentatives/);
@@ -53,7 +53,7 @@ describe('chargement à la demande du graphe OSM d’un secteur', () => {
       if (n === 3) throw new TypeError('Failed to fetch');
       return new Response(JSON.stringify(overpassGrid(metz)), { status: 200 });
     }) as typeof fetch;
-    const r = await loadZoneGraph(metz, half, 'Metz', { fetchFn: f, cache: null, retryDelayMs: 1, onProgress: (t) => progress.push(t) });
+    const r = await loadZoneGraph(metz, half, 'Metz', { fetchFn: f, cache: null, retryDelayMs: 1, useStatus: false, onProgress: (t) => progress.push(t) });
     expect(n).toBe(4);
     expect(r.graph.edgeCount).toBeGreaterThan(100);
     expect(progress.some((t) => /tentative 4\/10/.test(t))).toBe(true);
@@ -69,7 +69,7 @@ describe('chargement à la demande du graphe OSM d’un secteur', () => {
       if (bodies.length <= 4) return new Promise((_res, rej) => init?.signal?.addEventListener('abort', () => rej(new DOMException('x', 'AbortError'))));
       return Promise.resolve(new Response(JSON.stringify(overpassGrid(metz)), { status: 200 }));
     }) as typeof fetch;
-    const r = await loadZoneGraph(metz, half, 'Metz', { fetchFn: f, cache: null, timeoutMs: 30, retryDelayMs: 1, includePois: () => pois });
+    const r = await loadZoneGraph(metz, half, 'Metz', { fetchFn: f, cache: null, timeoutMs: 30, retryDelayMs: 1, useStatus: false, includePois: () => pois });
     expect(bodies.length).toBe(5);
     expect(bodies.slice(0, 3).every((b) => b.includes('["shop"]'))).toBe(true); // jamais allégée d'office
     expect(bodies[3]).not.toContain('["shop"]'); // allégée seulement après le choix du joueur
@@ -83,19 +83,48 @@ describe('chargement à la demande du graphe OSM d’un secteur', () => {
       if (n === 1) return new Response(JSON.stringify({ elements: [], remark: 'runtime error: Query timed out in "query" at line 3 after 31 seconds.' }), { status: 200 });
       return new Response(JSON.stringify(overpassGrid(metz)), { status: 200 });
     }) as typeof fetch;
-    const r = await loadZoneGraph(metz, half, 'Metz', { fetchFn: f, cache: null, retryDelayMs: 1 });
+    const r = await loadZoneGraph(metz, half, 'Metz', { fetchFn: f, cache: null, retryDelayMs: 1, useStatus: false });
     expect(n).toBe(2);
     expect(r.graph.edgeCount).toBeGreaterThan(100);
   });
 
+  it('page d’état d’Overpass : créneaux libres, attente annoncée, absence de limite', () => {
+    expect(parseOverpassStatus('Connected as: 1.2.3.4\nRate limit: 2\n2 slots available now.\n')).toEqual({ freeNow: true, waitS: 0 });
+    expect(parseOverpassStatus('Rate limit: 2\nSlot available after: 2025-01-01T10:00:09Z, in 9 seconds.\n')).toEqual({ freeNow: false, waitS: 9 });
+    expect(parseOverpassStatus('Rate limit: 0\n')).toEqual({ freeNow: true, waitS: 0 });
+    expect(parseOverpassStatus('')).toEqual({ freeNow: false, waitS: 0 });
+  });
+
+  it('les tentatives ne s’empilent pas : on attend le créneau annoncé par le service (état et Retry-After) avant de relancer', async () => {
+    const t: Array<{ at: number; url: string }> = [];
+    const t0 = Date.now();
+    let n = 0;
+    const f = (async (u: RequestInfo | URL) => {
+      const url = String(u);
+      t.push({ at: Date.now() - t0, url });
+      if (url.endsWith('/status')) return new Response('Rate limit: 2\nSlot available after: x, in 1 seconds.\n', { status: 200 });
+      n++;
+      if (n === 1) return new Response('', { status: 429, headers: { 'retry-after': '1' } });
+      return new Response(JSON.stringify(overpassGrid(metz)), { status: 200 });
+    }) as typeof fetch;
+    const progress: string[] = [];
+    const r = await loadZoneGraph(metz, half, 'Metz', { fetchFn: f, cache: null, retryDelayMs: 10, onProgress: (x) => progress.push(x) });
+    expect(r.graph.edgeCount).toBeGreaterThan(100);
+    const statusCalls = t.filter((x) => x.url.endsWith('/status'));
+    expect(statusCalls.length).toBe(1);
+    const second = t.filter((x) => !x.url.endsWith('/status'))[1] as { at: number };
+    expect(second.at).toBeGreaterThanOrEqual(1800); // ≥ 2 s (créneau annoncé 1 s + 1 s de marge), pas 10 ms
+    expect(progress.some((x) => /dans 2 s/.test(x))).toBe(true);
+  }, 20000);
+
   it('le nombre de tentatives est réglable ; l’annulation pendant l’attente est immédiate', async () => {
     let n = 0;
     const f = (async () => { n++; return new Response('', { status: 429 }); }) as typeof fetch;
-    await expect(loadZoneGraph(metz, half, 'Metz', { fetchFn: f, cache: null, maxAttempts: 3, retryDelayMs: 1 })).rejects.toMatchObject({ kind: 'overloaded' });
+    await expect(loadZoneGraph(metz, half, 'Metz', { fetchFn: f, cache: null, maxAttempts: 3, retryDelayMs: 1, useStatus: false })).rejects.toMatchObject({ kind: 'overloaded' });
     expect(n).toBe(3);
     const ctl = new AbortController();
     const g = (async () => new Response('', { status: 429 })) as typeof fetch;
-    const p = loadZoneGraph(metz, half, 'Metz', { fetchFn: g, cache: null, signal: ctl.signal, retryDelayMs: 60_000 });
+    const p = loadZoneGraph(metz, half, 'Metz', { fetchFn: g, cache: null, signal: ctl.signal, retryDelayMs: 60_000, useStatus: false });
     setTimeout(() => ctl.abort(), 20);
     const t0 = Date.now();
     await expect(p).rejects.toMatchObject({ kind: 'cancelled' });
@@ -109,11 +138,11 @@ describe('chargement à la demande du graphe OSM d’un secteur', () => {
       if (urls.length === 1) throw new TypeError('Failed to fetch');
       return new Response(JSON.stringify(overpassGrid(metz)), { status: 200 });
     }) as typeof fetch;
-    const r = await loadZoneGraph(metz, half, 'Metz', { fetchFn: f, cache: null });
+    const r = await loadZoneGraph(metz, half, 'Metz', { fetchFn: f, cache: null, useStatus: false });
     expect(urls.length).toBe(2);
     expect(r.endpoint).toBe(urls[1]);
     const dead = (async () => { throw new TypeError('Failed to fetch'); }) as typeof fetch;
-    await expect(loadZoneGraph(metz, half, 'Metz', { fetchFn: dead, cache: null, retryDelayMs: 1 })).rejects.toMatchObject({ kind: 'network' });
+    await expect(loadZoneGraph(metz, half, 'Metz', { fetchFn: dead, cache: null, retryDelayMs: 1, useStatus: false })).rejects.toMatchObject({ kind: 'network' });
   });
 
   it('zone trop grande, secteur sans rues, réponse illisible : erreurs typées', async () => {
@@ -136,7 +165,7 @@ describe('chargement à la demande du graphe OSM d’un secteur', () => {
 
   it('le délai dépassé est signalé', async () => {
     const slow = ((_u: RequestInfo | URL, init?: RequestInit) => new Promise((_res, rej) => init?.signal?.addEventListener('abort', () => rej(new DOMException('x', 'AbortError'))))) as typeof fetch;
-    await expect(loadZoneGraph(metz, half, 'Metz', { fetchFn: slow, cache: null, timeoutMs: 20, retryDelayMs: 1, maxAttempts: 2, endpoints: ['https://a.example/api'] })).rejects.toMatchObject({ kind: 'timeout' });
+    await expect(loadZoneGraph(metz, half, 'Metz', { fetchFn: slow, cache: null, timeoutMs: 20, retryDelayMs: 1, useStatus: false, maxAttempts: 2, endpoints: ['https://a.example/api'] })).rejects.toMatchObject({ kind: 'timeout' });
   });
 
   it('le scénario de démonstration et le moteur démarrent sur ce graphe OSM (simulé) et jouent sans erreur', async () => {

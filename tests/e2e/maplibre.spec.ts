@@ -260,6 +260,7 @@ test.describe('fournisseur OpenStreetMap par défaut', () => {
       if (n <= 3) return route.fulfill({ status: n === 2 ? 504 : 429, body: 'saturé' });
       await route.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(overpassGrid(METZ)) });
     });
+    await page.route('**/api/status', (route) => route.fulfill({ status: 200, headers: { 'access-control-allow-origin': '*' }, body: 'Rate limit: 0\n' }));
     await page.goto('/?debug&autostart=metz&retryms=300');
     await expect(page.getByTestId('game')).toHaveAttribute('data-engine', 'preview', { timeout: 20_000 });
     await page.getByTestId('play-here').click();

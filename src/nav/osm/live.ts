@@ -14,12 +14,28 @@ import { parseOverpass } from './parseOverpass';
 export const OVERPASS_ENDPOINTS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
 /** Marge autour de la zone de jeu (m) pour ne pas couper les rues en bordure. */
 export const LIVE_MARGIN_M = 80;
-/** Délai par tentative : un service qui répond le fait en quelques secondes ; une connexion qui traîne est abandonnée et retentée. */
-export const LIVE_TIMEOUT_MS = 20_000;
+/**
+ * Délai par tentative. Il ne doit pas être trop court : Overpass continue de traiter côté serveur une requête que le client
+ * abandonne, et lui en envoyer aussitôt une autre occupe un second créneau (limite par adresse) : les tentatives qui
+ * s'accumulent se bloquent alors entre elles.
+ */
+export const LIVE_TIMEOUT_MS = 45_000;
 export const MIN_EDGES = 10;
 /** Les services Overpass publics sont souvent saturés : on réessaie jusqu'à 10 fois (attente croissante) avant de déclarer l'échec. */
 export const LIVE_MAX_ATTEMPTS = 10;
-export const LIVE_RETRY_DELAY_MS = 1500;
+export const LIVE_RETRY_DELAY_MS = 4000;
+/** Attente maximale dictée par le service (créneau libre annoncé, `Retry-After`). */
+export const LIVE_MAX_SERVER_WAIT_MS = 60_000;
+
+/** Lit la page d'état d'Overpass (`/api/status`) : créneaux libres maintenant, ou secondes avant le prochain créneau. */
+export function parseOverpassStatus(text: string): { freeNow: boolean; waitS: number } {
+  const free = /(\d+)\s+slots?\s+available now/i.exec(text);
+  if (free && Number(free[1]) > 0) return { freeNow: true, waitS: 0 };
+  const rate = /Rate limit:\s*(\d+)/i.exec(text);
+  if (rate && Number(rate[1]) === 0) return { freeNow: true, waitS: 0 }; // pas de limite
+  const after = /in\s+(\d+)\s+seconds?/i.exec(text);
+  return { freeNow: false, waitS: after ? Number(after[1]) : 0 };
+}
 
 export class LiveLoadError extends Error {
   constructor(
@@ -42,6 +58,8 @@ export interface LiveOptions {
   timeoutMs?: number;
   /** Choix du joueur, relu à chaque tentative : inclure les lieux d'intérêt (défaut oui). Jamais imposé par le chargeur. */
   includePois?: () => boolean;
+  /** Consulter la page d'état du service avant de réessayer (attend un créneau libre au lieu d'empiler les requêtes). Défaut oui. */
+  useStatus?: boolean;
   /** Nombre maximal de tentatives (toutes erreurs de service confondues), défaut 10. */
   maxAttempts?: number;
   /** Attente de base entre deux tentatives (ms) ; croît linéairement (×n), plafonnée à 8×. Défaut 1500. */
@@ -84,12 +102,13 @@ export async function loadZoneGraph(center: LngLat, half: { halfWidth: number; h
   } catch (e) {
     throw new LiveLoadError(e instanceof Error ? e.message : 'Zone trop grande.', 'too_large');
   }
-  const fullQuery = overpassQuery(bbox, { timeoutS: 30 });
-  const lightQuery = overpassQuery(bbox, { timeoutS: 30, pois: false });
+  const fullQuery = overpassQuery(bbox, { timeoutS: 40 });
+  const lightQuery = overpassQuery(bbox, { timeoutS: 40, pois: false });
   const fetchFn = o.fetchFn ?? fetch.bind(globalThis);
   let json: unknown = null;
   let used = '';
   let lastErr: LiveLoadError | null = null;
+  let retryAfterMs = 0;
   const endpoints = o.endpoints ?? OVERPASS_ENDPOINTS;
   const maxAttempts = Math.max(1, o.maxAttempts ?? LIVE_MAX_ATTEMPTS);
   const baseDelay = o.retryDelayMs ?? LIVE_RETRY_DELAY_MS;
@@ -105,6 +124,8 @@ export async function loadZoneGraph(center: LngLat, half: { halfWidth: number; h
     try {
       const res = await fetchFn(endpoint, { method: 'POST', body: new URLSearchParams({ data: query }), signal: ctl.signal });
       if (res.status === 429 || res.status === 504) {
+        const ra = Number(res.headers.get('retry-after'));
+        if (Number.isFinite(ra) && ra > 0) retryAfterMs = Math.min(LIVE_MAX_SERVER_WAIT_MS, ra * 1000);
         lastErr = new LiveLoadError(`Le service Overpass est surchargé ou limite l'usage (HTTP ${res.status}).`, 'overloaded');
       } else if (!res.ok) {
         lastErr = new LiveLoadError(`Le service Overpass a répondu HTTP ${res.status}.`, 'network');
@@ -127,8 +148,23 @@ export async function loadZoneGraph(center: LngLat, half: { halfWidth: number; h
       o.signal?.removeEventListener('abort', onAbort);
     }
     if (attempt < maxAttempts) {
-      // attente croissante (politesse envers un service public), interrompue par l'annulation du joueur
-      const wait = baseDelay * Math.min(8, attempt);
+      // attente croissante (politesse envers un service public) ; si le service annonce un créneau libre plus tard, on l'attend
+      let wait = Math.max(baseDelay * Math.min(8, attempt), retryAfterMs);
+      retryAfterMs = 0;
+      if (o.useStatus !== false) {
+        try {
+          const sctl = new AbortController();
+          const st = setTimeout(() => sctl.abort(), 4000);
+          const sres = await fetchFn(endpoint.replace(/interpreter\/?$/, 'status'), { signal: sctl.signal });
+          clearTimeout(st);
+          if (sres.ok) {
+            const info = parseOverpassStatus(await sres.text());
+            if (!info.freeNow && info.waitS > 0) wait = Math.max(wait, Math.min(LIVE_MAX_SERVER_WAIT_MS, (info.waitS + 1) * 1000));
+          }
+        } catch {
+          /* page d'état indisponible : on s'en tient à l'attente croissante */
+        }
+      }
       progress(`${(lastErr as LiveLoadError).message} Nouvelle tentative dans ${Math.max(1, Math.round(wait / 1000))} s (${attempt}/${maxAttempts} échouée${attempt > 1 ? 's' : ''})…`, 1);
       await new Promise<void>((res) => {
         const t = setTimeout(res, wait);
