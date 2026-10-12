@@ -155,3 +155,55 @@ describe('lieux d’intérêt OSM (phase 4)', () => {
     expect(q).not.toContain('police');
   });
 });
+
+describe('voies de bus en site propre (BHNS, ex. Mettis)', () => {
+  const cases: Array<[string, Record<string, string>]> = [
+    ['highway=busway', { highway: 'busway' }],
+    ['service=busway', { highway: 'service', service: 'busway' }],
+    ['service=bus', { highway: 'service', service: 'bus', access: 'no' }],
+    ['accès réservé aux bus', { highway: 'service', access: 'no', bus: 'designated' }],
+    ['psv=designated sur une rue résidentielle fermée', { highway: 'residential', access: 'no', psv: 'designated' }],
+    ['busway avec foot=no (interdiction légale seulement)', { highway: 'busway', foot: 'no', access: 'no' }],
+  ];
+  for (const [name, tags] of cases) {
+    it(`${name} : retenue, praticable à pied par un cortège, fermée à la circulation générale`, () => {
+      const r = classifyHighway(tags);
+      expect('excluded' in r, JSON.stringify(r)).toBe(false);
+      if ('excluded' in r) return;
+      expect(r.cls).toBe(EdgeClass.Busway);
+      expect(r.flags & EdgeFlag.Foot).toBeTruthy();
+      expect(r.flags & EdgeFlag.Motor).toBeFalsy();
+    });
+  }
+
+  it('une rue ordinaire fermée aux véhicules (access=no, sans bus) reste exclue', () => {
+    expect(classifyHighway({ highway: 'service', access: 'no' })).toEqual({ excluded: 'no_access' });
+    expect(classifyHighway({ highway: 'residential', access: 'private' })).toEqual({ excluded: 'no_access' });
+  });
+
+  it('le cortège emprunte la voie de bus quand elle est le seul passage ; les véhicules en urgence aussi', async () => {
+    const { NavContext } = await import('../../src/nav/astar');
+    const { DEFAULT_NAV_PARAMS } = await import('../../src/nav/params');
+    const mk = (tags: Record<string, string>) => {
+      const frameLat = 49.1193;
+      const els = [
+        { type: 'node', id: 1, lat: frameLat, lon: 6.1757 },
+        { type: 'node', id: 2, lat: frameLat, lon: 6.1767 },
+        { type: 'node', id: 3, lat: frameLat, lon: 6.1777 },
+        { type: 'way', id: 10, nodes: [1, 2], tags: { highway: 'residential' } },
+        { type: 'way', id: 11, nodes: [2, 3], tags },
+      ];
+      const g = buildGraphFromOverpassJson({ elements: els }, { origin: { lng: 6.1757, lat: frameLat } }).graph;
+      return { g, nav: new NavContext(g, DEFAULT_NAV_PARAMS) };
+    };
+    const { g, nav } = mk({ highway: 'busway' });
+    const to = { x: g.nodeX[g.nodeCount - 1] as number, y: g.nodeY[g.nodeCount - 1] as number };
+    const route = nav.findRoute({ x: g.nodeX[0] as number, y: g.nodeY[0] as number }, to, 'crowd');
+    expect(route).not.toBeNull();
+    // sans la règle, la voie aurait été absente du graphe
+    expect(g.edgeCount).toBe(2);
+    expect(nav.findRoute({ x: 0, y: 0 }, to, 'emergency')).not.toBeNull();
+    const { g: g2 } = mk({ highway: 'service', access: 'no' });
+    expect(g2.edgeCount).toBe(1);
+  });
+});

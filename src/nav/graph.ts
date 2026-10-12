@@ -18,6 +18,8 @@ export const EdgeClass = {
   Path: 9,
   Steps: 10,
   Track: 11,
+  /** Voie réservée aux bus (BHNS, couloirs) : praticable à pied par un cortège (matériellement), pas ouverte à la circulation générale. */
+  Busway: 12,
 } as const;
 export type EdgeClassId = (typeof EdgeClass)[keyof typeof EdgeClass];
 

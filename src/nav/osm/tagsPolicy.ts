@@ -39,7 +39,17 @@ const HIGHWAY: Record<string, ClassRule> = {
   path: { cls: EdgeClass.Path, foot: true, motor: false, width: 2.5 },
   steps: { cls: EdgeClass.Steps, foot: true, motor: false, width: 2.5 },
   track: { cls: EdgeClass.Track, foot: true, motor: false, width: 4 },
+  // voies de bus en site propre (BHNS, ex. Mettis à Metz) : praticables à pied, fermées à la circulation générale
+  busway: { cls: EdgeClass.Busway, foot: true, motor: false, width: 6 },
 };
+
+/** Voie de bus en site propre : `highway=busway`, `service=busway|bus`, ou accès réservé aux bus (`bus=designated`, `psv=designated`). */
+export function isBusway(tags: Tags): boolean {
+  if (tags.highway === 'busway') return true;
+  if (tags.highway === 'service' && (tags.service === 'busway' || tags.service === 'bus')) return true;
+  const reserved = tags.bus === 'designated' || tags.psv === 'designated' || tags.bus === 'yes' || tags.psv === 'yes';
+  return reserved && !!tags.access && DENIED.has(tags.access) && (tags.highway === 'service' || tags.highway === 'residential' || tags.highway === 'unclassified' || tags.highway === 'tertiary');
+}
 
 const EXCLUDED_SERVICE = new Set(['parking_aisle', 'driveway', 'drive-through', 'emergency_access']);
 const EXCLUDED_FOOTWAY = new Set(['sidewalk', 'crossing', 'traffic_island']);
@@ -65,19 +75,24 @@ export function classifyHighway(tags: Tags): HighwayInfo | { excluded: Exclusion
   const hw = tags.highway;
   if (!hw) return { excluded: 'not_highway' };
   if (tags.area === 'yes') return { excluded: 'area' };
-  const rule = HIGHWAY[hw];
+  const busway = isBusway(tags);
+  const rule = busway ? HIGHWAY.busway : HIGHWAY[hw];
   if (!rule) return { excluded: 'excluded_class' };
-  if (hw === 'service' && tags.service && EXCLUDED_SERVICE.has(tags.service)) return { excluded: 'excluded_service' };
+  if (!busway && hw === 'service' && tags.service && EXCLUDED_SERVICE.has(tags.service)) return { excluded: 'excluded_service' };
   if (hw === 'footway' && tags.footway && EXCLUDED_FOOTWAY.has(tags.footway)) return { excluded: 'excluded_footway' };
 
   const access = tags.access;
   let foot = rule.foot;
   let motor = rule.motor;
-  if (access && DENIED.has(access)) {
+  if (busway) {
+    // l'interdiction légale (access=no, foot=no) n'empêche pas matériellement un cortège de s'y engager
+    foot = true;
+    motor = false;
+  } else if (access && DENIED.has(access)) {
     foot = tags.foot === 'yes' || tags.foot === 'designated' || tags.foot === 'permissive';
     motor = tags.motor_vehicle === 'yes' || tags.motor_vehicle === 'permissive';
   }
-  if (tags.foot && DENIED.has(tags.foot)) foot = false;
+  if (!busway && tags.foot && DENIED.has(tags.foot)) foot = false;
   for (const k of ['motor_vehicle', 'vehicle', 'motorcar']) if (tags[k] && DENIED.has(tags[k] as string)) motor = false;
   if (!foot && !motor) return { excluded: 'no_access' };
 

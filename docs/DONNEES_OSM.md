@@ -70,3 +70,7 @@ Puis, dans le jeu, choisir la ville avec le fond « Carte OpenStreetMap » : **l
 | « Emprise … refusée » | `--max-area-km2` dépassé | ne pas augmenter l'emprise ; réduire la zone |
 | fichier très gros / lent | bâtiments de Paris | `--no-buildings` |
 | le jeu reste en fond schématique | paquet absent ou en 404 | vérifier `public/data/osm/<ville>.graph.json` et relancer le serveur |
+
+## Voies de bus en site propre (BHNS, ex. Mettis à Metz)
+
+Retenues comme classe `Busway` : `highway=busway`, `highway=service` + `service=busway|bus`, ou voie fermée (`access=no`) réservée aux bus (`bus=designated`, `psv=designated`). Praticables **à pied** par un cortège (l'interdiction légale n'empêche pas matériellement de s'y engager), non ouvertes à la circulation générale ; les véhicules en avertisseurs peuvent les emprunter (voies larges, vitesse réduite). Avant ce correctif elles étaient exclues du graphe (`excluded_class` / `no_access`), donc invisibles pour le moteur. Les couloirs de bus **dans** la chaussée d'une rue ordinaire font déjà partie de cette rue.

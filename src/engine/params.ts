@@ -211,7 +211,7 @@ export const DEFAULT_SIM_PARAMS: SimParams = {
   marchFrontWidthMaxM: 14,
   marchFrontWidthMinM: 2,
   arrivalZoneM: 40,
-  speedFactorByClass: { 0: 1.05, 1: 1.03, 2: 1, 3: 0.98, 4: 0.98, 5: 0.95, 6: 0.92, 7: 1, 8: 0.95, 9: 0.85, 10: 0.6, 11: 0.8 },
+  speedFactorByClass: { 0: 1.05, 1: 1.03, 2: 1, 3: 0.98, 4: 0.98, 5: 0.95, 6: 0.92, 7: 1, 8: 0.95, 9: 0.85, 10: 0.6, 11: 0.8, 12: 1 },
   crowdAccelMps2: 0.35,
   waitDensity: 3,
   walkHalfWidthMaxM: 32,

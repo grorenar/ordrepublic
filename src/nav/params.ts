@@ -44,7 +44,7 @@ export interface NavParams {
 import { EdgeClass } from './graph';
 
 /** Classes piétonnes qu'un véhicule peut emprunter si elles sont assez larges (jamais les escaliers). */
-export const FOOTWAY_CLASSES: ReadonlySet<number> = new Set([EdgeClass.Pedestrian, EdgeClass.Footway, EdgeClass.Path, EdgeClass.Track]);
+export const FOOTWAY_CLASSES: ReadonlySet<number> = new Set([EdgeClass.Pedestrian, EdgeClass.Footway, EdgeClass.Path, EdgeClass.Track, EdgeClass.Busway]);
 
 export const DEFAULT_NAV_PARAMS: NavParams = {
   speedFootMps: 1.4,

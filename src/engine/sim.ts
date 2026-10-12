@@ -964,7 +964,7 @@ export class Sim {
     const dv = p.crowdAccelMps2 * dt;
     g.speedMps = g.speedMps < target ? Math.min(target, g.speedMps + dv) : Math.max(target, g.speedMps - 2 * dv);
     const limiting = Math.min(widthF, cohF, otherF);
-    const CLASS_NAME: Record<number, string> = { [EdgeClass.Steps]: 'escaliers', [EdgeClass.Path]: 'sentier', [EdgeClass.Footway]: 'chemin piéton', [EdgeClass.Service]: 'voie de service', [EdgeClass.Track]: 'piste', [EdgeClass.Primary]: 'grand axe' };
+    const CLASS_NAME: Record<number, string> = { [EdgeClass.Steps]: 'escaliers', [EdgeClass.Path]: 'sentier', [EdgeClass.Footway]: 'chemin piéton', [EdgeClass.Service]: 'voie de service', [EdgeClass.Track]: 'piste', [EdgeClass.Busway]: 'voie de bus', [EdgeClass.Primary]: 'grand axe' };
     if (classF > 1.001 && limiting >= 0.999) g.speedCause = `type de rue : ${CLASS_NAME[c0.cls] ?? 'axe large'} (plus rapide)`;
     else if (f >= 0.999 && classF >= 0.999) g.speedCause = 'libre';
     else if (classF < limiting && classF < 0.999) g.speedCause = `type de rue : ${CLASS_NAME[c0.cls] ?? 'rue secondaire'}`;
