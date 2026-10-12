@@ -40,7 +40,7 @@ const HIGHWAY: Record<string, ClassRule> = {
   steps: { cls: EdgeClass.Steps, foot: true, motor: false, width: 2.5 },
   track: { cls: EdgeClass.Track, foot: true, motor: false, width: 4 },
   // voies de bus en site propre (BHNS, ex. Mettis à Metz) : praticables à pied, fermées à la circulation générale
-  busway: { cls: EdgeClass.Busway, foot: true, motor: false, width: 6 },
+  busway: { cls: EdgeClass.Busway, foot: true, motor: false, width: 8 },
 };
 
 /** Voie de bus en site propre : `highway=busway`, `service=busway|bus`, ou accès réservé aux bus (`bus=designated`, `psv=designated`). */

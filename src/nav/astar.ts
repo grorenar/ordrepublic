@@ -41,7 +41,11 @@ export class NavContext {
   canTraverse(e: number, forward: boolean, mode: NavMode): boolean {
     const f = this.graph.edgeFlags[e] as number;
     if (mode === 'vehicle' || mode === 'emergency') {
-      if (!(f & EdgeFlag.Motor)) return this.footwayVehicleSpeed(e) > 0;
+      if (!(f & EdgeFlag.Motor)) {
+        // une voie de bus en site propre n'est ouverte qu'aux véhicules avec avertisseurs (mode `emergency`)
+        if (this.graph.edgeClass[e] === EdgeClass.Busway && mode !== 'emergency') return false;
+        return this.footwayVehicleSpeed(e) > 0;
+      }
       // avertisseurs actifs : sens interdits permis (circulation à contresens)
       if (mode === 'vehicle') {
         if (f & EdgeFlag.Oneway && !forward) return false;
@@ -61,9 +65,11 @@ export class NavContext {
 
   private footwayVehicleSpeed(e: number): number {
     const p = this.params;
-    if (!FOOTWAY_CLASSES.has(this.graph.edgeClass[e] as number)) return 0;
+    const cls = this.graph.edgeClass[e] as number;
+    if (!FOOTWAY_CLASSES.has(cls)) return 0;
     const w = this.state ? Math.max(this.state.walkWidth[e] as number, this.graph.edgeWidth[e] as number) : (this.graph.edgeWidth[e] as number);
-    return w >= p.vehicleFootwayMinWidthM ? p.vehicleFootwaySpeedMps : 0;
+    if (w < p.vehicleFootwayMinWidthM) return 0;
+    return cls === EdgeClass.Busway ? p.speedVehicleByClass[EdgeClass.Busway] ?? p.vehicleFootwaySpeedMps : p.vehicleFootwaySpeedMps;
   }
 
   /** Milieu d'une arête (pour la zone d'arrivée). */
