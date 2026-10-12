@@ -37,7 +37,7 @@ export async function provideWorld(city: City, want: WorldKind, fetchFn?: typeof
     return {
       ...schematic(city),
       missingPack: true,
-      notice: `Aucun paquet OSM préparé pour ${city.name} : la simulation n'est pas disponible sur la carte réelle (ses rues ne correspondraient pas au graphe de navigation). Voir docs/DONNEES_OSM.md.`,
+      notice: `Aucun paquet OSM préparé pour ${city.name} : les rues du secteur choisi seront chargées à la demande.`,
     };
   }
   return schematic(city);

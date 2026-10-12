@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { alignmentErrors, mapBox, openGame, servePack, targets, view } from './helpers';
+import { overpassGrid } from '../fixtures/overpassGrid';
 
 const METZ = { lng: 6.1757, lat: 49.1193 };
 
@@ -124,16 +125,19 @@ test.describe('fournisseur OpenStreetMap par défaut', () => {
     layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#223' } }, { id: 'l', type: 'line', source: 's', paint: { 'line-color': '#fff' } }],
   };
 
-  test('sans paquet OSM : la carte réelle reste affichée (aperçu), aucune simulation superposée, lancement explicite du schématique', async ({ page }) => {
-    await page.route(STYLE, (route) => route.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(okStyle) }));
+  const mockStyle = (page: import('@playwright/test').Page) =>
+    page.route(STYLE, (route) => route.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(okStyle) }));
+  const OVERPASS = 'https://overpass-api.de/api/interpreter';
+
+  test('sans paquet OSM : la carte réelle reste affichée avec le rectangle de secteur, aucune simulation avant le choix', async ({ page }) => {
+    await mockStyle(page);
     await page.goto('/?debug&autostart=metz');
     await expect(page.getByTestId('game')).toHaveAttribute('data-engine', 'preview', { timeout: 20_000 });
     await expect(page.getByTestId('game')).toHaveAttribute('data-map-kind', 'maplibre');
     await expect(page.getByTestId('game')).toHaveAttribute('data-map-state', 'ready');
     await expect(page.locator('.maplibregl-canvas')).toBeVisible();
     await expect(page.locator('.maplibregl-ctrl-attrib')).toContainText('OpenStreetMap');
-    await expect(page.getByTestId('preview-banner')).toContainText('aperçu sans simulation');
-    // aucun pion, aucun moteur sur la vraie carte
+    await expect(page.getByTestId('preview-banner')).toContainText('Jouer ici');
     expect(await page.evaluate(() => (window as any).__ORDRE__.ctrl)).toBeNull();
     expect((await targets(page)).length).toBe(0);
     // la carte reste utilisable : zoom et déplacement
@@ -149,10 +153,56 @@ test.describe('fournisseur OpenStreetMap par défaut', () => {
     await page.mouse.up();
     await page.waitForTimeout(500);
     expect((await view(page)).lng).toBeGreaterThan(v1.lng);
-    // lancement explicite de la simulation : fond schématique cohérent avec le graphe
+    // repli explicite possible : ville fictive
     await page.getByTestId('start-schematic').click();
     await expect(page.getByTestId('game')).toHaveAttribute('data-map-kind', 'schematic');
     await expect(page.getByTestId('game')).toHaveAttribute('data-engine', 'ready', { timeout: 20_000 });
+  });
+
+  test('« Jouer ici » : les rues du secteur sont chargées à la demande (une requête POST), la simulation démarre sur la vraie carte, pions alignés', async ({ page }) => {
+    await mockStyle(page);
+    const posts: string[] = [];
+    await page.route(OVERPASS, async (route) => {
+      posts.push(route.request().method());
+      const data = decodeURIComponent((route.request().postData() ?? '').replace(/^data=/, '').replace(/\+/g, ' '));
+      expect(data).toContain('way["highway"]');
+      await route.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(overpassGrid(METZ)) });
+    });
+    await page.goto('/?debug&autostart=metz');
+    await expect(page.getByTestId('game')).toHaveAttribute('data-engine', 'preview', { timeout: 20_000 });
+    await page.getByTestId('play-here').click();
+    await expect(page.getByTestId('game')).toHaveAttribute('data-engine', 'ready', { timeout: 30_000 });
+    expect(posts).toEqual(['POST']);
+    await expect(page.getByTestId('game')).toHaveAttribute('data-map-kind', 'maplibre');
+    await expect(page.getByTestId('log-panel')).toContainText('Cortège syndical');
+    expect(await page.evaluate(() => (window as any).__ORDRE__.ctrl.sim.graph.provenance.source)).toBe('osm');
+    const r = await alignmentErrors(page);
+    expect(r.checked).toBeGreaterThan(3);
+    expect(r.maxErr).toBeLessThan(0.75);
+    await page.getByTestId('zoom-in').click();
+    await page.waitForTimeout(700);
+    const r2 = await alignmentErrors(page);
+    expect(r2.maxErr).toBeLessThan(0.75);
+  });
+
+  test('« Jouer ici » : service surchargé (429) → message explicite, la carte et le choix de secteur restent disponibles', async ({ page }) => {
+    await mockStyle(page);
+    await page.route(OVERPASS, (route) => route.fulfill({ status: 429, body: 'trop de requêtes' }));
+    await page.goto('/?debug&autostart=metz');
+    await expect(page.getByTestId('game')).toHaveAttribute('data-engine', 'preview', { timeout: 20_000 });
+    await page.getByTestId('play-here').click();
+    await expect(page.getByTestId('live-error')).toContainText('surchargé');
+    await expect(page.getByTestId('play-here')).toBeEnabled();
+    await expect(page.locator('.maplibregl-canvas')).toBeVisible();
+  });
+
+  test('« Jouer ici » : service injoignable → message explicite, aucun blocage', async ({ page }) => {
+    await mockStyle(page);
+    await page.route('**/api/interpreter', (route) => route.abort('failed'));
+    await page.goto('/?debug&autostart=metz');
+    await expect(page.getByTestId('game')).toHaveAttribute('data-engine', 'preview', { timeout: 20_000 });
+    await page.getByTestId('play-here').click();
+    await expect(page.getByTestId('live-error')).toContainText('injoignable', { timeout: 20_000 });
   });
 
   test('service de carte injoignable : message clair puis bascule automatique en mode schématique', async ({ page }) => {

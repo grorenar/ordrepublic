@@ -5,6 +5,8 @@ import { DEFAULT_ZOOM, MAP_PROVIDERS, type MapProviderId } from '../config/mapCo
 import type { Settings } from '../config/settings';
 import { GameController } from '../game/controller';
 import { provideWorld, type WorldKind } from '../game/world';
+import { LiveLoadError, indexedDbCache, loadZoneGraph } from '../nav/osm/live';
+import type { StreetGraph } from '../nav/graph';
 import { DEFAULT_ZONE_LEVEL, ZONE_LEVELS } from '../game/zones';
 import type { EntityRef } from '../game/selection';
 import type { LogEvent } from '../engine/types';
@@ -74,6 +76,9 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
   const [fatal, setFatal] = useState<string | null>(null);
   /** Carte réelle affichée sans simulation (aucun paquet OSM cohérent pour la ville). */
   const [preview, setPreview] = useState<string | null>(null);
+  /** Graphe OSM chargé à la demande pour le secteur choisi (origine = centre de la carte au moment du choix). */
+  const [live, setLive] = useState<{ origin: LngLat; graph: StreetGraph } | null>(null);
+  const [liveStatus, setLiveStatus] = useState<{ state: 'idle' | 'loading' | 'error'; text: string }>({ state: 'idle', text: '' });
 
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -90,7 +95,8 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
   ctrlRef.current = ctrl;
 
   const provider: MapProviderId = debug.providerOverride ?? settings.provider;
-  const frame = useMemo(() => new LocalFrame(city.center), [city]);
+  const origin: LngLat = live?.origin ?? city.center;
+  const frame = useMemo(() => new LocalFrame(origin), [origin.lng, origin.lat]);
   const frameRef = useRef(frame);
   frameRef.current = frame;
   const zone = ZONE_LEVELS[zoneLevel] as (typeof ZONE_LEVELS)[number];
@@ -101,6 +107,8 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
     setCtrl(null);
     setFatal(null);
     setPreview(null);
+    setLive(null);
+    setLiveStatus({ state: 'idle', text: '' });
     setBanners([]);
     setOrderMode(false);
     // fournisseur de test local (debug) : le fond n'est pas une carte réelle, on simule sur le graphe schématique
@@ -130,6 +138,18 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [city, mapKind]);
+
+  // ---- moteur sur le graphe OSM chargé à la demande
+  useEffect(() => {
+    if (!live) return;
+    try {
+      setCtrl(new GameController({ graph: live.graph, zoneLevel }));
+      setPreview(null);
+    } catch (err) {
+      setFatal(`Initialisation du moteur impossible : ${err instanceof Error ? err.message : String(err)}`);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [live]);
 
   // ---- cycle de vie de l'adaptateur de carte
   useEffect(() => {
@@ -204,12 +224,13 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
   }, []);
 
   useEffect(() => {
-    rendererRef.current?.setController(ctrl, city.center);
-  }, [ctrl, city]);
+    rendererRef.current?.setController(ctrl, origin);
+  }, [ctrl, origin.lng, origin.lat]);
   useEffect(() => {
     rendererRef.current?.setZone(zone);
+    rendererRef.current?.setPreviewZone(preview !== null && !ctrl ? zone : null);
     ctrlRef.current?.setZoneLevel(zoneLevel);
-  }, [zone, zoneLevel, ctrl]);
+  }, [zone, zoneLevel, ctrl, preview]);
 
   // ---- changement de ville : saut de caméra
   const firstCity = useRef(true);
@@ -397,7 +418,11 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
   const changeZone = (next: number) => {
     setZoneLevel(next);
     const a = adapterRef.current;
-    if (a) a.flyTo(city.center, zoomToFitZone(a, frame, next));
+    if (a) {
+      const v = a.getView();
+      const c = ctrlRef.current ? origin : preview !== null ? { lng: v.lng, lat: v.lat } : city.center;
+      a.flyTo(c, zoomToFitZone(a, new LocalFrame(c), next));
+    }
   };
   const fitZone = () => adapterRef.current?.fitBounds(zoneBounds(frame, zoneLevel), 90);
   const switchMap = () => {
@@ -405,6 +430,25 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
     setNotice(null);
     setMapKind(next);
     onSettings({ ...settings, preferSchematic: next === 'schematic' });
+  };
+  /** « Jouer ici » : charge les rues OSM du rectangle de jeu centré sur la vue, puis démarre la simulation. */
+  const playHere = async () => {
+    const a = adapterRef.current;
+    if (!a || liveStatus.state === 'loading') return;
+    const v = a.getView();
+    const center = { lng: v.lng, lat: v.lat };
+    setLiveStatus({ state: 'loading', text: 'Préparation…' });
+    try {
+      const r = await loadZoneGraph(center, ZONE_LEVELS[zoneLevel] as (typeof ZONE_LEVELS)[number], city.name, {
+        cache: indexedDbCache(),
+        onProgress: (text) => setLiveStatus({ state: 'loading', text }),
+      });
+      setLiveStatus({ state: 'idle', text: '' });
+      setLive({ origin: center, graph: r.graph });
+    } catch (err) {
+      const text = err instanceof LiveLoadError ? err.message : `Chargement impossible : ${err instanceof Error ? err.message : String(err)}`;
+      setLiveStatus({ state: 'error', text });
+    }
   };
   const pickCity = (c: City) => {
     setCity(c);
@@ -448,10 +492,17 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
             </span>
           ) : preview ? (
             <span class="situation preview" data-testid="preview-banner" role="status">
-              <strong>Carte réelle — aperçu sans simulation.</strong> {preview}{' '}
-              <button type="button" class="primary" data-testid="start-schematic" onClick={() => { setNotice(null); setMapKind('schematic'); }}>
-                Lancer la simulation (fond schématique)
+              <strong>Carte réelle.</strong> Placez le rectangle bleu sur le secteur de jeu (déplacez/zoomez la carte, taille avec ◂ ▸), puis cliquez « Jouer ici ». Les rues OpenStreetMap du secteur sont alors téléchargées (une requête).{' '}
+              <button type="button" class="primary" data-testid="play-here" disabled={liveStatus.state === 'loading'} onClick={playHere}>
+                {liveStatus.state === 'loading' ? 'Chargement…' : 'Jouer ici'}
+              </button>{' '}
+              <button type="button" data-testid="start-schematic" onClick={() => { setNotice(null); setMapKind('schematic'); }}>
+                Ou jouer sur la ville fictive (fond schématique)
               </button>
+              {liveStatus.state === 'loading' && <span data-testid="live-progress"> {liveStatus.text}</span>}
+              {liveStatus.state === 'error' && (
+                <span class="warn" role="alert" data-testid="live-error"> {liveStatus.text}</span>
+              )}
             </span>
           ) : (
             <span class="muted">Préparation de la simulation…</span>

@@ -82,6 +82,7 @@ export class GameRenderer {
   private ctrl: GameController | null = null;
   private frame: LocalFrame | null = null;
   private zone: GameZone = { halfWidth: 600, halfHeight: 450 };
+  private previewZone: GameZone | null = null;
   private raf = 0;
   private running = false;
   private durations: number[] = [];
@@ -126,6 +127,11 @@ export class GameRenderer {
 
   setZone(z: GameZone): void {
     this.zone = z;
+  }
+
+  /** Aperçu du secteur de jeu avant chargement : rectangle centré à l'écran (la carte se déplace dessous). */
+  setPreviewZone(z: GameZone | null): void {
+    this.previewZone = z;
   }
 
   start(): void {
@@ -218,6 +224,26 @@ export class GameRenderer {
     ctx.clearRect(0, 0, this.cssW, this.cssH);
     this.targets = [];
     this.lastDots = 0;
+    if (this.previewZone && !this.ctrl && this.cssW > 1) {
+      // projection affine centrée sur l'écran (pas de repère local : la carte réelle seule)
+      const ppm = pixelsPerMeter(view.lat, view.zoom);
+      const w = this.previewZone.halfWidth * ppm;
+      const h = this.previewZone.halfHeight * ppm;
+      const cx = this.cssW / 2;
+      const cy = this.cssH / 2;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, this.cssW, this.cssH);
+      ctx.rect(cx - w, cy - h, 2 * w, 2 * h);
+      ctx.fillStyle = 'rgba(4,10,20,0.42)';
+      ctx.fill('evenodd');
+      ctx.setLineDash([14, 8]);
+      ctx.lineWidth = 2.4;
+      ctx.strokeStyle = COLORS.zone;
+      ctx.strokeRect(cx - w, cy - h, 2 * w, 2 * h);
+      ctx.restore();
+      this.pill(`Secteur de jeu ${Math.round(this.previewZone.halfWidth * 2)} × ${Math.round(this.previewZone.halfHeight * 2)} m`, cx - w + 10, cy - h + 14, { size: 11, bg: 'rgba(8,47,73,0.85)', border: COLORS.zone, align: 'left' });
+    }
     if (this.ctrl && this.frame && this.cssW > 1) {
       this.setProjection(view);
       this.drawScene(this.ctrl, view, nowMs / 1000);
