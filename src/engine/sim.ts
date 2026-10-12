@@ -59,7 +59,7 @@ export type ScenarioEvent =
   | { id: Id; atMs: number; kind: 'begin_dispersal'; groupKey: string; exit: Anchor; durationMs: number; reason: string; /** Attend que le groupe soit installé (sinon l'événement est réessayé à chaque tick). */ whenSettled?: boolean }
   | { id: Id; atMs: number; kind: 'split_group'; groupKey: string; count: number; child: SplitChild; reason: string }
   /** Le rassemblement `groupKey` (installé) se met en marche vers `destination` : chacun part de sa place, la tête en premier. */
-  | { id: Id; atMs: number; kind: 'begin_march'; groupKey: string; destination: Anchor; onArrival?: 'settle' | 'join_target' | 'leave'; joinTargetKey?: string; label?: string; reason: string }
+  | { id: Id; atMs: number; kind: 'begin_march'; groupKey: string; destination: Anchor; /** Points de passage imposés (itinéraire forcé). */ waypoints?: Anchor[]; onArrival?: 'settle' | 'join_target' | 'leave'; joinTargetKey?: string; label?: string; reason: string }
   /** Le rassemblement `groupKey` se disperse en plusieurs colonnes, chacune vers une sortie différente (parts en fraction de l'effectif). */
   /** Fixe la tension de fond d'un groupe (le scénario scénarise l'ambiance ; les incidents en découlent par règles). */
   | { id: Id; atMs: number; kind: 'set_tension'; groupKey: string; tension: number; reason: string }
@@ -595,12 +595,12 @@ export class Sim {
    * Mise en marche d'un rassemblement installé (le cortège part de son point de rassemblement). Cause obligatoire.
    * Retourne faux (et journalise) si aucun itinéraire n'existe.
    */
-  beginMarch(groupId: Id, dest: { destination: Anchor; onArrival?: 'settle' | 'join_target' | 'leave'; joinTargetKey?: string; label?: string }, cause: Cause): boolean {
+  beginMarch(groupId: Id, dest: { destination: Anchor; waypoints?: Anchor[]; onArrival?: 'settle' | 'join_target' | 'leave'; joinTargetKey?: string; label?: string }, cause: Cause): boolean {
     this.requireCause(cause);
     const g = this.group(groupId);
     if (!g || g.phase !== 'settled' || g.kind !== 'static' || !g.layout) return false;
     const from = g.layout.anchor;
-    const plan: GroupPlan = { waypoints: [], onArrival: dest.onArrival ?? 'settle', joinTargetId: dest.joinTargetKey ? this.keyToId.get(dest.joinTargetKey) : undefined, patienceMs: 120000, destination: dest.destination };
+    const plan: GroupPlan = { waypoints: dest.waypoints ?? [], onArrival: dest.onArrival ?? 'settle', joinTargetId: dest.joinTargetKey ? this.keyToId.get(dest.joinTargetKey) : undefined, patienceMs: 120000, destination: dest.destination };
     const planned = this.planRoute(from, plan);
     if (!planned) {
       this.log('warn', 'group.march_failed', `${g.label} : aucun itinéraire vers ${dest.destination.label}, le rassemblement reste en place.`, cause, { type: 'group', id: g.id });
@@ -839,7 +839,7 @@ export class Sim {
         }
         case 'begin_march': {
           const g = this.groupByKey(ev.groupKey);
-          if (g) this.beginMarch(g.id, { destination: ev.destination, onArrival: ev.onArrival, joinTargetKey: ev.joinTargetKey, label: ev.label }, cause);
+          if (g) this.beginMarch(g.id, { destination: ev.destination, waypoints: ev.waypoints, onArrival: ev.onArrival, joinTargetKey: ev.joinTargetKey, label: ev.label }, cause);
           break;
         }
         case 'disperse_sectors': {

@@ -9,6 +9,7 @@ import { ProceduralSpriteProvider } from './sprites/procedural';
 import { MARKERS, ringMarker, STATUS_MARKERS, statusMarker } from './sprites/markers';
 import { buildSnapshot, crowdPose, decorSpriteFor, orientationIndex, type RenderablePose, type RenderableSnapshot, type RenderableUnit, type RenderableVehicle } from './sprites/snapshot';
 import type { SpriteProvider, SpriteQuery, SpriteRegion } from './sprites/types';
+import type { OperationPlan } from '../scenarios/plan';
 
 const COLORS = {
   accent: '#22d3ee',
@@ -97,6 +98,8 @@ export class GameRenderer {
   sprites: SpriteProvider;
   /** Manifeste actif : tailles réelles, rayons de sélection, orientations. */
   manifest: ManifestIndex;
+  /** Plan d'opération en cours d'édition (mode planification) et aperçu de l'itinéraire : dessinés par-dessus la carte. */
+  planOverlay: { plan: OperationPlan; route: Vec2[] | null; routeError: string | null } | null = null;
   /** Dernier instantané de rendu (positions interpolées, données sémantiques). */
   snapshot: RenderableSnapshot | null = null;
   private readonly pose: RenderablePose = { x: 0, y: 0, dir: 0, variant: 0, walking: false, seed: 0 };
@@ -293,6 +296,7 @@ export class GameRenderer {
     if (on('zone')) this.drawZone(t);
     if (on('streets')) this.drawStreets(c, t, lod);
     if (on('routes')) this.drawRoutes(c, alpha, t);
+    if (this.planOverlay) this.drawPlan(this.planOverlay, t);
     if (on('crowd')) this.drawCrowds(c, alpha, lod, t);
     const snap = buildSnapshot(c, alpha, t);
     this.snapshot = snap;
@@ -632,6 +636,63 @@ export class GameRenderer {
     ctx.lineWidth = 1.6;
     ctx.stroke();
     ctx.restore();
+  }
+
+  /** Plan d'opération : itinéraire prévu, départ, arrivée, points de passage, axes fermés, unités. */
+  private drawPlan(o: NonNullable<GameRenderer['planOverlay']>, t: number): void {
+    const { ctx } = this;
+    const pt = (v: Vec2) => this.toScreen(v);
+    if (o.route && o.route.length > 1) {
+      ctx.save();
+      ctx.beginPath();
+      o.route.forEach((v, i) => {
+        const p = pt(v);
+        if (i === 0) ctx.moveTo(p.x, p.y);
+        else ctx.lineTo(p.x, p.y);
+      });
+      ctx.setLineDash([10, 7]);
+      ctx.lineDashOffset = -t * 14 * this.motion;
+      ctx.lineWidth = 3.5;
+      ctx.strokeStyle = 'rgba(8,12,20,0.7)';
+      ctx.stroke();
+      ctx.lineWidth = 2.2;
+      ctx.strokeStyle = '#60a5fa';
+      ctx.stroke();
+      ctx.restore();
+    }
+    for (const c of o.plan.closures) {
+      const p = pt(c);
+      this.barrierIcon(p.x, p.y, 11);
+    }
+    o.plan.units.forEach((u, i) => {
+      const p = pt(u.pos);
+      ctx.save();
+      ctx.fillStyle = '#1d4ed8';
+      ctx.strokeStyle = '#bfdbfe';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.rect(p.x - 9, p.y - 9, 18, 18);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+      this.pill(`Unité ${i + 1}`, p.x, p.y - 20, { size: 10, bg: 'rgba(8,18,50,0.92)', border: '#bfdbfe' });
+    });
+    const flag = (v: Vec2, color: string, text: string) => {
+      const p = pt(v);
+      ctx.save();
+      ctx.strokeStyle = '#0b1220';
+      ctx.fillStyle = color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+      this.pill(text, p.x, p.y - 20, { size: 11, bg: COLORS.pill, border: color, bold: true });
+    };
+    o.plan.waypoints.forEach((w, i) => flag(w, '#facc15', `Passage ${i + 1}`));
+    flag(o.plan.start, '#4ade80', 'Départ');
+    flag(o.plan.end, '#f87171', 'Arrivée');
   }
 
   // -- monde : décor, lieux d'intérêt, incidents ---------------------------

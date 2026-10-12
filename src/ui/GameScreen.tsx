@@ -19,6 +19,10 @@ import { pixelsPerMeter } from '../geo/mercator';
 import type { City } from '../state/types';
 import { CitySearch } from './CitySearch';
 import { DetailPanel, ForcesPanel, LogPanel, TopBar } from './panels';
+import { PlanPanel, type PlanTool } from './PlanPanel';
+import type { DemoScenario } from '../scenarios/demoScenario';
+import { blankScenario, compilePlan, emptyPlan, parsePlan, PlanError, previewRoute, type OperationPlan } from '../scenarios/plan';
+import type { ForceKind } from '../engine/types';
 
 export interface DebugFlags {
   debug: boolean;
@@ -102,6 +106,21 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
   orderModeRef.current = orderMode;
   ctrlRef.current = ctrl;
 
+  // ---- mode planification (bac à sable)
+  const [planning, setPlanning] = useState(false);
+  const [plan, setPlan] = useState<OperationPlan>(emptyPlan);
+  const [planTool, setPlanTool] = useState<PlanTool | null>(null);
+  const [planForce, setPlanForce] = useState<ForceKind>('crs');
+  const [planError, setPlanError] = useState<string | null>(null);
+  const planningRef = useRef(false);
+  const planRef = useRef(plan);
+  const planToolRef = useRef<PlanTool | null>(null);
+  const planForceRef = useRef<ForceKind>('crs');
+  planningRef.current = planning;
+  planRef.current = plan;
+  planToolRef.current = planTool;
+  planForceRef.current = planForce;
+
   const [aerial, setAerial] = useState(false);
   /** Vue mixte : noms de rues, de lieux et contours de bâtiments par-dessus la photo aérienne. */
   const [labels, setLabels] = useState(true);
@@ -122,6 +141,8 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
     setLiveStatus({ state: 'idle', text: '', step: 0 });
     setBanners([]);
     setOrderMode(false);
+    setPlanning(false);
+    setPlanTool(null);
     // fournisseur de test local (debug) : le fond n'est pas une carte réelle, on simule sur le graphe schématique
     const want: WorldKind = debug.providerOverride ? 'schematic' : mapKind;
     provideWorld(city, want).then((w) => {
@@ -324,6 +345,19 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
       if (moved > 5 || !c || (e.target as HTMLElement).closest('.map-ui')) return;
       const at = world(p);
       if (!at) return;
+      if (planningRef.current && planToolRef.current) {
+        const p = planRef.current;
+        const tool = planToolRef.current;
+        const near = (a: Vec2, r: number) => Math.hypot(a.x - at.w.x, a.y - at.w.y) <= r;
+        const r = Math.max(15, at.tol);
+        if (tool === 'start') setPlan({ ...p, start: at.w });
+        else if (tool === 'end') setPlan({ ...p, end: at.w });
+        else if (tool === 'waypoint') setPlan({ ...p, waypoints: p.waypoints.some((w) => near(w, r)) ? p.waypoints.filter((w) => !near(w, r)) : [...p.waypoints, at.w] });
+        else if (tool === 'closure') setPlan({ ...p, closures: p.closures.some((w) => near(w, r)) ? p.closures.filter((w) => !near(w, r)) : [...p.closures, at.w] });
+        else if (tool === 'unit') setPlan({ ...p, units: p.units.some((u) => near(u.pos, r)) ? p.units.filter((u) => !near(u.pos, r)) : [...p.units, { force: planForceRef.current, pos: at.w, headcount: planForceRef.current === 'crs' ? 30 : 20 }] });
+        setPlanError(null);
+        return;
+      }
       if (orderModeRef.current) {
         c.orderMove(at.w);
         setOrderMode(false);
@@ -443,6 +477,72 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
     },
     [centerOn],
   );
+  // ---- planification : redémarrage du moteur avec un scénario donné (le graphe du monde est conservé)
+  const restartWith = useCallback(
+    (scenario: DemoScenario | undefined, paused: boolean) => {
+      const c = ctrlRef.current;
+      if (!c) return;
+      const gc = new GameController({ graph: c.sim.graph, zoneLevel, scenario });
+      if (paused) gc.setSpeed(0);
+      setBanners([]);
+      setCtrl(gc);
+      setRev((r) => r + 1);
+    },
+    [zoneLevel],
+  );
+  const enterPlanning = () => {
+    const c = ctrlRef.current;
+    if (!c) return;
+    const pl = c.scenario.places.plaza.pos;
+    const ad = c.scenario.places.admin.pos;
+    setPlan({ ...emptyPlan(), start: pl, end: Math.hypot(pl.x - ad.x, pl.y - ad.y) > 50 ? ad : { x: pl.x + 250, y: pl.y + 150 } });
+    setPlanError(null);
+    setPlanTool(null);
+    setPlanning(true);
+    restartWith(blankScenario(), true);
+  };
+  const leavePlanning = () => {
+    setPlanning(false);
+    setPlanTool(null);
+    setPlanError(null);
+    restartWith(undefined, false);
+  };
+  const launchPlan = () => {
+    const c = ctrlRef.current;
+    if (!c) return;
+    try {
+      const sc = compilePlan(c.sim.graph, plan);
+      setPlanning(false);
+      setPlanTool(null);
+      setPlanError(null);
+      restartWith(sc, false);
+    } catch (err) {
+      setPlanError(err instanceof PlanError ? err.message : `Plan impossible : ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+  const exportPlan = () => {
+    const url = URL.createObjectURL(new Blob([JSON.stringify(plan, null, 2)], { type: 'application/json' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `plan-${plan.name.replace(/[^\w-]+/g, '_') || 'operation'}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+  const importPlan = async (file: File) => {
+    try {
+      setPlan(parsePlan(JSON.parse(await file.text())));
+      setPlanError(null);
+    } catch (err) {
+      setPlanError(err instanceof PlanError ? err.message : 'Fichier illisible : ce n’est pas un plan JSON valide.');
+    }
+  };
+  const routeInfo = useMemo(() => (planning && ctrl ? previewRoute(ctrl.sim.graph, plan) : null), [planning, ctrl, plan]);
+  useEffect(() => {
+    const r = rendererRef.current;
+    if (!r) return;
+    r.planOverlay = planning ? { plan, route: routeInfo && 'points' in routeInfo ? routeInfo.points : null, routeError: routeInfo && 'error' in routeInfo ? routeInfo.error : null } : null;
+  }, [planning, plan, routeInfo, ctrl]);
+
   const changeZone = (next: number) => {
     setZoneLevel(next);
     const a = adapterRef.current;
@@ -555,7 +655,12 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
           <CitySearch geocoderUrl={settings.geocoderUrl} onPick={pickCity} compact />
         </div>
       )}
-      <aside class="side left">{ctrl && <ForcesPanel ctrl={ctrl} onSelect={select} />}</aside>
+      <aside class="side left">
+        {ctrl && planning && (
+          <PlanPanel plan={plan} tool={planTool} force={planForce} routeInfo={routeInfo} error={planError} onTool={setPlanTool} onForce={setPlanForce} onChange={setPlan} onLaunch={launchPlan} onCancel={leavePlanning} onExport={exportPlan} onImport={(f) => void importPlan(f)} />
+        )}
+        {ctrl && <ForcesPanel ctrl={ctrl} onSelect={select} />}
+      </aside>
 
       <section class={`map-area ${orderMode ? 'order-mode' : ''}`} ref={wrapRef} aria-label="Carte de la zone de jeu">
         <div class={`map-host ${tactical && !aerial ? 'tactical' : ''}`} ref={hostRef} data-testid="map-host" />
@@ -576,7 +681,7 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
               <p class="muted small" data-testid="live-progress">
                 {liveStatus.text} · {loadSecs} s
               </p>
-              {loadSecs >= 12 && liveStatus.step === 1 && <p class="small">Le service OpenStreetMap peut être lent selon la charge ; le délai maximal est de 60 s.</p>}
+              {loadSecs >= 12 && liveStatus.step === 1 && <p class="small">Le service OpenStreetMap peut être lent selon la charge : une connexion qui traîne est abandonnée après 20 s puis retentée automatiquement (jusqu’à 10 fois).</p>}
               <button type="button" data-testid="load-cancel" onClick={() => abortRef.current?.abort()} disabled={liveStatus.step >= 2}>
                 Annuler
               </button>
@@ -634,6 +739,11 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
         </div>
 
         <div class="map-bottom map-ui">
+          {ctrl && !planning && (
+            <button type="button" data-testid="plan-toggle" onClick={enterPlanning} title="Préparer une manifestation déclarée et un dispositif, puis la simuler (bac à sable)">
+              Planification
+            </button>
+          )}
           <button type="button" data-testid="switch-map" onClick={switchMap} title="Basculer entre la carte OSM et le fond schématique (la simulation redémarre)">
             Fond : {mapLabel}
           </button>

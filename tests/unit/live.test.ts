@@ -60,6 +60,34 @@ describe('chargement à la demande du graphe OSM d’un secteur', () => {
     expect(progress.some((t) => /Nouvelle tentative/.test(t))).toBe(true);
   });
 
+  it('requête complète (avec lieux d’intérêt) puis allégée dès la 3e tentative ; une connexion qui traîne est abandonnée et retentée', async () => {
+    const bodies: string[] = [];
+    const f = ((_u: RequestInfo | URL, init?: RequestInit) => {
+      bodies.push(String((init?.body as URLSearchParams).get('data')));
+      if (bodies.length <= 3) return new Promise((_res, rej) => init?.signal?.addEventListener('abort', () => rej(new DOMException('x', 'AbortError')))); // service qui ne répond pas
+      return Promise.resolve(new Response(JSON.stringify(overpassGrid(metz)), { status: 200 }));
+    }) as typeof fetch;
+    const r = await loadZoneGraph(metz, half, 'Metz', { fetchFn: f, cache: null, timeoutMs: 30, retryDelayMs: 1 });
+    expect(bodies.length).toBe(4);
+    expect(bodies[0]).toContain('["shop"]');
+    expect(bodies[1]).toContain('["shop"]');
+    expect(bodies[2]).not.toContain('["shop"]');
+    expect(bodies[3]).not.toContain('["shop"]');
+    expect(r.graph.edgeCount).toBeGreaterThan(100);
+  });
+
+  it('une réponse HTTP 200 portant une erreur d’exécution Overpass (délai serveur) est retentée', async () => {
+    let n = 0;
+    const f = (async () => {
+      n++;
+      if (n === 1) return new Response(JSON.stringify({ elements: [], remark: 'runtime error: Query timed out in "query" at line 3 after 31 seconds.' }), { status: 200 });
+      return new Response(JSON.stringify(overpassGrid(metz)), { status: 200 });
+    }) as typeof fetch;
+    const r = await loadZoneGraph(metz, half, 'Metz', { fetchFn: f, cache: null, retryDelayMs: 1 });
+    expect(n).toBe(2);
+    expect(r.graph.edgeCount).toBeGreaterThan(100);
+  });
+
   it('le nombre de tentatives est réglable ; l’annulation pendant l’attente est immédiate', async () => {
     let n = 0;
     const f = (async () => { n++; return new Response('', { status: 429 }); }) as typeof fetch;

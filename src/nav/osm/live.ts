@@ -14,7 +14,10 @@ import { parseOverpass } from './parseOverpass';
 export const OVERPASS_ENDPOINTS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
 /** Marge autour de la zone de jeu (m) pour ne pas couper les rues en bordure. */
 export const LIVE_MARGIN_M = 80;
-export const LIVE_TIMEOUT_MS = 60_000;
+/** Délai par tentative : un service qui répond le fait en quelques secondes ; une connexion qui traîne est abandonnée et retentée. */
+export const LIVE_TIMEOUT_MS = 20_000;
+/** À partir de cette tentative, la requête est allégée (sans lieux d'intérêt) : le jeu reste jouable, seuls les noms de lieux manquent. */
+export const LIVE_LIGHT_FROM_ATTEMPT = 3;
 export const MIN_EDGES = 10;
 /** Les services Overpass publics sont souvent saturés : on réessaie jusqu'à 10 fois (attente croissante) avant de déclarer l'échec. */
 export const LIVE_MAX_ATTEMPTS = 10;
@@ -81,7 +84,8 @@ export async function loadZoneGraph(center: LngLat, half: { halfWidth: number; h
   } catch (e) {
     throw new LiveLoadError(e instanceof Error ? e.message : 'Zone trop grande.', 'too_large');
   }
-  const query = overpassQuery(bbox, { timeoutS: 50 });
+  const fullQuery = overpassQuery(bbox, { timeoutS: 30 });
+  const lightQuery = overpassQuery(bbox, { timeoutS: 30, pois: false });
   const fetchFn = o.fetchFn ?? fetch.bind(globalThis);
   let json: unknown = null;
   let used = '';
@@ -91,7 +95,9 @@ export async function loadZoneGraph(center: LngLat, half: { halfWidth: number; h
   const baseDelay = o.retryDelayMs ?? LIVE_RETRY_DELAY_MS;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const endpoint = endpoints[(attempt - 1) % endpoints.length] as string;
-    progress(`Téléchargement des rues et bâtiments OpenStreetMap (${new URL(endpoint).host})${maxAttempts > 1 ? ` — tentative ${attempt}/${maxAttempts}` : ''}…`, 1);
+    const light = attempt >= LIVE_LIGHT_FROM_ATTEMPT;
+    const query = light ? lightQuery : fullQuery;
+    progress(`Téléchargement des rues et bâtiments OpenStreetMap (${new URL(endpoint).host})${maxAttempts > 1 ? ` — tentative ${attempt}/${maxAttempts}` : ''}${light ? ', requête allégée sans lieux' : ''}…`, 1);
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), o.timeoutMs ?? LIVE_TIMEOUT_MS);
     const onAbort = () => ctl.abort();
@@ -103,9 +109,14 @@ export async function loadZoneGraph(center: LngLat, half: { halfWidth: number; h
       } else if (!res.ok) {
         lastErr = new LiveLoadError(`Le service Overpass a répondu HTTP ${res.status}.`, 'network');
       } else {
-        json = await res.json();
-        used = endpoint;
-        break;
+        const body = (await res.json()) as { remark?: unknown };
+        // Overpass renvoie parfois HTTP 200 avec une « remark » d'erreur d'exécution (délai serveur dépassé) et des données vides ou partielles
+        if (typeof body.remark === 'string' && /runtime error|timed out|out of memory|too busy/i.test(body.remark)) lastErr = new LiveLoadError(`Le service Overpass n'a pas terminé la requête (${body.remark.slice(0, 80)}).`, 'timeout');
+        else {
+          json = body;
+          used = endpoint;
+          break;
+        }
       }
     } catch (e) {
       if (o.signal?.aborted) throw cancelled();

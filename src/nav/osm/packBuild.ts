@@ -48,7 +48,7 @@ export function checkBboxSafety(b: Bbox, maxKm2 = MAX_QUERY_AREA_KM2): void {
  * Requête Overpass unique et bornée : voies, places, parcs et (optionnellement) bâtiments de l'emprise.
  * Les relations (multipolygones) ne sont pas demandées : elles ne sont pas gérées par le constructeur de graphe.
  */
-export function overpassQuery(b: Bbox, o: { buildings?: boolean; timeoutS?: number } = {}): string {
+export function overpassQuery(b: Bbox, o: { buildings?: boolean; timeoutS?: number; pois?: boolean } = {}): string {
   const bb = `${b.south.toFixed(6)},${b.west.toFixed(6)},${b.north.toFixed(6)},${b.east.toFixed(6)}`;
   const parts = [
     `way["highway"](${bb});`,
@@ -57,11 +57,12 @@ export function overpassQuery(b: Bbox, o: { buildings?: boolean; timeoutS?: numb
     // administrations (mairie, tribunal, bâtiments gouvernementaux) : pour placer un piquet devant une vraie administration
     `way["amenity"~"^(townhall|courthouse)$"](${bb});`,
     `way["office"="government"](${bb});`,
-    // lieux d'intérêt (commerces, écoles, établissements, mobilier) : affichage et contexte de rue, jamais des cibles
-    `nwr["shop"](${bb});`,
-    `nwr["amenity"~"${POI_AMENITY_REGEX}"](${bb});`,
-    `nwr["office"](${bb});`,
   ];
+  // lieux d'intérêt (commerces, écoles, établissements, mobilier) : affichage et contexte de rue, jamais des cibles.
+  // Nœuds et chemins seulement (pas de relations : requête bien plus légère) ; omis dans la requête allégée des nouvelles tentatives.
+  if (o.pois !== false) {
+    parts.push(`node["shop"](${bb});`, `way["shop"](${bb});`, `node["amenity"~"${POI_AMENITY_REGEX}"](${bb});`, `way["amenity"~"${POI_AMENITY_REGEX}"](${bb});`, `node["office"](${bb});`);
+  }
   if (o.buildings !== false) parts.push(`way["building"](${bb});`);
   return `[out:json][timeout:${o.timeoutS ?? 90}];\n(\n  ${parts.join('\n  ')}\n);\n(._;>;);\nout body qt;`;
 }
