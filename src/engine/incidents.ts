@@ -143,6 +143,11 @@ export class IncidentSystem {
     for (const g of this.d.groups) if (g.tension > g.baseTension) g.tension = Math.max(g.baseTension, g.tension - decay);
   }
 
+  /** Objet pouvant subir un incident : décor synthétique, ou vitrine d'un commerce réel si le jeu l'autorise (tirage au hasard, jamais classé). */
+  private targetable(it: DecorItem): boolean {
+    return it.source === 'synthetic' || (it.kind === 'shopfront' && this.d.params.incidents.realShopsTargetable);
+  }
+
   private unitNear(x: number, y: number): boolean {
     const r = this.d.params.incidents.unitWatchM;
     for (const u of this.d.units) if (Math.hypot(u.x - x, u.y - y) <= r) return true;
@@ -163,13 +168,13 @@ export class IncidentSystem {
       if (factor <= 0) continue;
       const seen = new Map<Id, DecorItem>();
       for (const s of pts) this.d.world.near(s.x, s.y, ip.reachM, (it) => seen.set(it.id, it));
-      const candidates = [...seen.values()].filter((it) => it.state === 'intact' && !it.incidentId && TARGET_WEIGHT[it.kind] > 0 && it.source === 'synthetic').sort((a, b) => (a.id < b.id ? -1 : 1));
+      const candidates = [...seen.values()].filter((it) => it.state === 'intact' && !it.incidentId && TARGET_WEIGHT[it.kind] > 0 && this.targetable(it)).sort((a, b) => (a.id < b.id ? -1 : 1));
       for (const it of candidates) {
         const prob = ip.baseRatePerS * dtS * factor * TARGET_WEIGHT[it.kind] * (this.unitNear(it.x, it.y) ? ip.unitDeterrence : 1);
         if (unit(hash32(this.d.seed, hash32(this.d.tick(), hashStr(it.id))), 7) >= prob) continue;
         const kind = incidentKindFor(it.kind);
         if (!kind) continue;
-        const cause: Cause = { kind: 'rule', refId: g.id, note: `tension ${Math.round(g.tension)} du groupe « ${g.label} » (${size} personnes) au contact de ${DECOR_LABEL[it.kind]} (objet de scénario fictif)` };
+        const cause: Cause = { kind: 'rule', refId: g.id, note: `tension ${Math.round(g.tension)} du groupe « ${g.label} » (${size} personnes) au contact de ${DECOR_LABEL[it.kind]} (${it.source === 'osm' ? 'commerce réel : incident purement fictif, tiré au hasard' : 'objet de scénario fictif'})` };
         if (this.create(kind, it, cause, { groupId: g.id })) {
           g.lastIncidentMs = now;
           activeCount++;
@@ -186,7 +191,7 @@ export class IncidentSystem {
     let best: DecorItem | null = null;
     let bestD = 40;
     this.d.world.near(x, y, 40, (it) => {
-      if (it.state !== 'intact' || it.incidentId || it.source !== 'synthetic' || TARGET_WEIGHT[it.kind] <= 0) return;
+      if (it.state !== 'intact' || it.incidentId || !this.targetable(it) || TARGET_WEIGHT[it.kind] <= 0) return;
       const k = incidentKindFor(it.kind);
       const ok = kind === k || (kind === 'fire' && (it.kind === 'shopfront' || it.kind === 'container' || it.kind === 'bus_shelter' || it.kind === 'bench'));
       if (!ok) return;
@@ -217,7 +222,7 @@ export class IncidentSystem {
       endedAtMs: null,
       targetDecorId: it.id,
       poiId: it.poiId,
-      label: `${KIND_LABEL[kind]} — ${DECOR_LABEL[it.kind]} (scénario fictif)`,
+      label: `${KIND_LABEL[kind]} — ${poi && !poi.fictional && poi.name ? poi.name : DECOR_LABEL[it.kind]} (scénario fictif)`,
       cause,
       parentId: o.parent?.id,
       childIds: [],
@@ -365,7 +370,7 @@ export class IncidentSystem {
     const cands: DecorItem[] = [];
     this.d.world.near(inc.x, inc.y, ip.spreadReachM, (it) => {
       const minSev = FLAMMABLE[it.kind];
-      if (minSev === undefined || inc.severity < minSev || it.state !== 'intact' || it.incidentId || it.source !== 'synthetic') return;
+      if (minSev === undefined || inc.severity < minSev || it.state !== 'intact' || it.incidentId || !this.targetable(it)) return;
       cands.push(it);
     });
     cands.sort((a, b) => (a.id < b.id ? -1 : 1));

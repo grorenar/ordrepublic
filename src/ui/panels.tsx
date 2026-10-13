@@ -320,7 +320,7 @@ export function DetailPanel({ ctrl, orderMode, onOrderMode, onCenter, onClose }:
       title = p.name ?? POI_KIND_LABEL[p.kind];
       rows = [
         ['Nature', `${POI_KIND_LABEL[p.kind]}${p.category ? ` (${p.category})` : ''}`],
-        ['Source', p.source === 'osm' ? 'OpenStreetMap (information géographique, jamais une cible)' : 'objet de scénario fictif'],
+        ['Source', p.source === 'osm' ? 'OpenStreetMap (lieu réel ; un incident fictif tiré au hasard peut s’y produire)' : 'objet de scénario fictif'],
         ['État', POI_STATE_LABEL[p.state]],
         ['Dégâts', `${Math.round(p.damage)} / 100`],
       ];

@@ -117,6 +117,53 @@ describe('déclenchement par la foule (règle explicite, jamais gratuit)', () =>
   });
 });
 
+describe('commerces réels (OSM) : cibles possibles d’incidents fictifs, tirés au hasard et à égalité', () => {
+  const addRealShops = (sim: Sim, x: number, y: number) => {
+    const mk = (category: string, dx: number) => {
+      const poi = sim.world.addPoi({ kind: 'commerce', category, name: `${category} réel`, x: x + dx, y, radius: 12, source: 'osm', fictional: false });
+      sim.world.addDecor({ kind: 'shopfront', x: x + dx, y, heading: 0, source: 'osm', poiId: poi.id, cause: calm });
+      return poi;
+    };
+    return [mk('bakery', -4), mk('bank', 4), mk('pharmacy', 0)];
+  };
+
+  it('un commerce réel peut subir un bris de vitrine fictif : dégâts sur le lieu, libellé « fictif », nom réel affiché', () => {
+    const sim = makeSim({ seed: 2 });
+    const [shop] = addRealShops(sim, 0, 0);
+    const inc = sim.incidents.spawnNear('window_break', shop!.x, shop!.y, calm)!;
+    expect(inc).not.toBeNull();
+    sim.run(200);
+    expect(shop!.damage).toBeGreaterThan(0);
+    expect(inc.label).toContain('réel');
+    expect(inc.label).toMatch(/fictif/);
+  });
+
+  it('tirage à égalité : aucune catégorie de commerce n’est privilégiée (boulangerie, banque, pharmacie)', () => {
+    const hits: Record<string, number> = {};
+    for (let seed = 1; seed <= 36; seed++) {
+      const sim = makeSim({ seed, params: { incidents: { baseRatePerS: 0.02, cooldownS: 5, maxActive: 40 } } });
+      // aucun autre objet ne doit concurrencer les trois commerces : on vide le décor voisin
+      for (const d of [...sim.world.decor]) if (Math.hypot(d.x, d.y) < 60) sim.world.removeDecor(d.id);
+      addRealShops(sim, 0, 0);
+      crowdAt(sim, 0, 0, { size: 1500, tension: 90 });
+      sim.run(1500);
+      for (const i of sim.incidents.incidents) {
+        const poi = i.poiId ? sim.world.poi(i.poiId) : undefined;
+        if (poi && !poi.fictional) hits[poi.category] = (hits[poi.category] ?? 0) + 1;
+      }
+    }
+    const v = ['bakery', 'bank', 'pharmacy'].map((k) => hits[k] ?? 0);
+    expect(Math.min(...v)).toBeGreaterThan(0);
+    expect(Math.max(...v)).toBeLessThan(Math.min(...v) * 4); // même ordre de grandeur : pas de classement
+  }, 240_000);
+
+  it('réglable : désactivé, seuls les commerces fictifs du jeu sont ciblés', () => {
+    const sim = makeSim({ seed: 2, params: { incidents: { realShopsTargetable: false } } });
+    const [shop] = addRealShops(sim, 0, 0);
+    expect(sim.incidents.spawnNear('window_break', shop!.x, shop!.y, calm)?.poiId).not.toBe(shop!.id);
+  });
+});
+
 describe('machine à états et conséquences persistantes', () => {
   const fireOn = (kind: 'bin' | 'container', seed = 1, params = {}) => {
     const sim = makeSim({ seed, params });

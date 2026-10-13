@@ -44,6 +44,7 @@ Contrôles de cohérence appliqués à la création d’un `Sim` (`validateSimPa
 | `streetMarginM` | m | 0.8 | Marge entre un cortège et le bord de la rue. | Réduit la largeur utile du front (2 marges retirées de la largeur de rue). |
 | `columnLengthRateMps` | m/s | 4 | Vitesse maximale de variation de la longueur de colonne. | Lisse l’allongement/raccourcissement quand la largeur de rue change : aucun saut de position. |
 | `staticMaxRadiusM` | m | 2500 | Rayon maximal exploré pour placer un rassemblement statique. | Au-delà, la densité effective augmente (journalisé) ; borne le coût de mise en place. |
+| `departureUnroll` | 0–1 | 1 | Part de « démarrage étalé » d’un cortège qui part d’un rassemblement. | 1 : tout le monde part en même temps, les plus éloignés de la tête avancent plus lentement et le cortège s’étire ; 0 : chacun attend l’arrivée de la colonne (convergence tardive vers l’entrée, effet « aspirateur »). |
 | `fill.openCost` | multiple (0–1) | 0.45 | Coût relatif d’un déplacement en espace ouvert (place, parc) dans le remplissage d’un rassemblement. | Plus bas : la foule occupe d’abord la place voisine plutôt que les rues ; 1 = aucune préférence. |
 | `fill.behindPenalty` | multiple | 0.9 | Surcoût des cellules situées à l’opposé du sens de départ du cortège dans le remplissage d’un rassemblement. | Plus haut : le rassemblement s’étire dans le sens de la marche (moins de convergence depuis l’arrière au départ) ; 0 = remplissage isotrope. |
 
@@ -99,6 +100,7 @@ Contrôles de cohérence appliqués à la création d’un `Sim` (`validateSimPa
 | `world.commercialRadiusM` | m | 80 | Rayon de comptage des commerces OSM pour la catégorie de rue. | Plus grand : davantage de rues sont qualifiées de commerçantes. |
 | `world.maxDecor` | objets | 8000 | Plafond du nombre d’objets de décor générés. | Protège la mémoire et le temps de rendu sur de très grandes zones. |
 | `world.minOffsetM` | m | 1.2 | Distance minimale entre un objet de décor et l’axe de la rue. | Évite de poser des objets au milieu de la chaussée. |
+| `incidents.realShopsTargetable` | booléen | true | Autorise les commerces réels cartographiés dans OpenStreetMap à subir des incidents (bris de vitrine, incendie), toujours explicitement fictifs. | Tirage au hasard, à égalité entre tous les commerces à portée : aucune catégorie n’est classée ni privilégiée. Désactivé : seuls les commerces fictifs du jeu sont ciblés. |
 | `incidents.everyTicks` | ticks | 10 | Période d’évaluation des incidents. | Plus grand : moins de calcul, réactivité moindre (10 ticks = 1 s de jeu). |
 | `incidents.triggerTension` | 0–100 | 40 | Tension d’un groupe à partir de laquelle il peut provoquer un incident. | Plus haut : la foule doit être plus tendue avant le moindre dégât. |
 | `incidents.reachM` | m | 25 | Distance entre un individu du groupe et un objet pour qu’il soit à portée. | Plus grand : plus d’objets exposés autour d’une foule. |

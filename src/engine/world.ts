@@ -161,8 +161,12 @@ export function buildWorld(g: StreetGraph, state: EdgeState, mask: WalkMask | nu
       w.addDecor({ kind: p.category === 'bench' ? 'bench' : 'bin', x: p.x, y: p.y, heading: 0, source: 'osm', cause: osmCause });
       continue;
     }
-    w.addPoi({ kind: p.kind, category: p.category, name: p.name, x: p.x, y: p.y, radius: 12, source: p.source, osmId: p.osmId, fictional: false });
-    if (p.kind === 'commerce') commerce.push({ x: p.x, y: p.y });
+    const poi = w.addPoi({ kind: p.kind, category: p.category, name: p.name, x: p.x, y: p.y, radius: 12, source: p.source, osmId: p.osmId, fictional: false });
+    if (p.kind === 'commerce') {
+      commerce.push({ x: p.x, y: p.y });
+      // la vitrine du commerce réel : cible possible d'un incident fictif (invisible tant qu'elle est intacte : le lieu s'affiche en épingle)
+      w.addDecor({ kind: 'shopfront', x: p.x, y: p.y, heading: 0, source: 'osm', poiId: poi.id, cause: osmCause });
+    }
   }
   // espaces de rassemblement (places, parcs)
   for (const sp of g.spaces) {

@@ -76,6 +76,7 @@ export const PARAM_DOCS: ParamDoc[] = [
   { path: 'lod.hysteresis', group: 'Niveaux de simulation', unit: 'ratio', meaning: 'Marge relative avant de rétrograder un niveau.', effect: 'Évite l’oscillation de niveau d’un bloc situé à la frontière d’un seuil.' },
 
   // --- états de rue / navigation
+  { path: 'departureUnroll', group: 'Densités et géométrie', unit: '0–1', meaning: 'Part de « démarrage étalé » d’un cortège qui part d’un rassemblement.', effect: '1 : tout le monde part en même temps, les plus éloignés de la tête avancent plus lentement et le cortège s’étire ; 0 : chacun attend l’arrivée de la colonne (convergence tardive vers l’entrée, effet « aspirateur »).' },
   { path: 'fill.openCost', group: 'Densités et géométrie', unit: 'multiple (0–1)', meaning: 'Coût relatif d’un déplacement en espace ouvert (place, parc) dans le remplissage d’un rassemblement.', effect: 'Plus bas : la foule occupe d’abord la place voisine plutôt que les rues ; 1 = aucune préférence.' },
   { path: 'fill.behindPenalty', group: 'Densités et géométrie', unit: 'multiple', meaning: 'Surcoût des cellules situées à l’opposé du sens de départ du cortège dans le remplissage d’un rassemblement.', effect: 'Plus haut : le rassemblement s’étire dans le sens de la marche (moins de convergence depuis l’arrière au départ) ; 0 = remplissage isotrope.' },
 
@@ -92,6 +93,7 @@ export const PARAM_DOCS: ParamDoc[] = [
   { path: 'world.minOffsetM', group: 'Monde et incidents', unit: 'm', meaning: 'Distance minimale entre un objet de décor et l’axe de la rue.', effect: 'Évite de poser des objets au milieu de la chaussée.' },
 
   // --- incidents (phase 4)
+  { path: 'incidents.realShopsTargetable', group: 'Monde et incidents', unit: 'booléen', meaning: 'Autorise les commerces réels cartographiés dans OpenStreetMap à subir des incidents (bris de vitrine, incendie), toujours explicitement fictifs.', effect: 'Tirage au hasard, à égalité entre tous les commerces à portée : aucune catégorie n’est classée ni privilégiée. Désactivé : seuls les commerces fictifs du jeu sont ciblés.' },
   { path: 'incidents.everyTicks', group: 'Monde et incidents', unit: 'ticks', meaning: 'Période d’évaluation des incidents.', effect: 'Plus grand : moins de calcul, réactivité moindre (10 ticks = 1 s de jeu).' },
   { path: 'incidents.triggerTension', group: 'Monde et incidents', unit: '0–100', meaning: 'Tension d’un groupe à partir de laquelle il peut provoquer un incident.', effect: 'Plus haut : la foule doit être plus tendue avant le moindre dégât.' },
   { path: 'incidents.reachM', group: 'Monde et incidents', unit: 'm', meaning: 'Distance entre un individu du groupe et un objet pour qu’il soit à portée.', effect: 'Plus grand : plus d’objets exposés autour d’une foule.' },

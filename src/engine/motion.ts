@@ -61,6 +61,17 @@ export function frameEntry(f: RouteFrame, lat: number): { x: number; y: number }
   return { x: f.x + f.nx * (f.c + lat * f.hw), y: f.y + f.ny * (f.c + lat * f.hw) };
 }
 
+/** Distance (m) de chaque individu derrière la tête de colonne au moment du départ (0 si déjà sur la route). */
+function initialBehind(g: CrowdGroup, prof: ReturnType<typeof profileFor>, aHead: number, rho: number): Float32Array {
+  const n = g.members.n;
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const s = prof.inverse(aHead - (n - i - 0.5) / rho);
+    out[i] = s < 0 ? -s : 0;
+  }
+  return out;
+}
+
 function marchTargets(g: CrowdGroup, c: MotionCtx, from: number, to: number): void {
   const m = g.members;
   const route = g.route as NonNullable<CrowdGroup['route']>;
@@ -95,7 +106,16 @@ function marchTargets(g: CrowdGroup, c: MotionCtx, from: number, to: number): vo
       const sy = g.startPos[2 * i + 1] as number;
       const e = frameEntry(startF, m.lat[i] as number);
       const dist = Math.hypot(e.x - sx, e.y - sy);
-      const f = dist > 1e-6 ? Math.max(0, Math.min(1, (s + dist) / dist)) : 1;
+      let f = dist > 1e-6 ? Math.max(0, Math.min(1, (s + dist) / dist)) : 1;
+      const u = c.params.departureUnroll;
+      if (u > 0) {
+        // démarrage étalé : tout le monde se met en route tout de suite et arrive à l'entrée quand SA place y arrive ; plus on est loin
+        // derrière la tête, plus la progression est lente (le cortège s'étire au lieu que l'arrière attende puis converge)
+        if (!g.startBehind) g.startBehind = initialBehind(g, prof, aHead, rho);
+        const L = g.startBehind[i] as number;
+        const fNew = L > 1e-6 ? Math.max(0, Math.min(1, (s + L) / L)) : 1;
+        f = f + (fNew - f) * u;
+      }
       m.tx[i] = sx + (e.x - sx) * f;
       m.ty[i] = sy + (e.y - sy) * f;
       continue;

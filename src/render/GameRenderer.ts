@@ -706,6 +706,7 @@ export class GameRenderer {
     const W = this.cssW + 40;
     const H = this.cssH + 40;
     for (const d of c.sim.world.decor) {
+      if (d.source === 'osm' && d.kind === 'shopfront' && d.state === 'intact') continue; // commerce réel intact : seule l'épingle du lieu s'affiche
       const sx = this.cx + (d.x - this.mx) * this.ppm;
       const sy = this.cy - (d.y - this.my) * this.ppm;
       if (sx < -40 || sy < -40 || sx > W || sy > H) continue;

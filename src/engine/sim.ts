@@ -373,6 +373,7 @@ export class Sim {
       entryStart: 0,
       exitStart: members.n,
       startPos: null,
+      startBehind: null,
       profile: null,
       speedMps: 0,
       speedCause: 'à l’arrêt',
@@ -574,6 +575,7 @@ export class Sim {
     idx.sort((a, b) => (d[b] as number) - (d[a] as number) || a - b); // le plus lointain d'abord (indice 0 = queue)
     permuteMembers(m, idx);
     for (let i = 0; i < n; i++) m.slotOf[i] = n - 1 - i;
+    g.startBehind = null;
     g.startPos = new Float32Array(2 * n);
     for (let i = 0; i < n; i++) {
       g.startPos[2 * i] = m.x[i] as number;
@@ -889,6 +891,7 @@ export class Sim {
     if (!leaving) g.exitStart = g.members.n;
     // colonne formée depuis un rassemblement : une fois la queue partie, les positions de départ ne servent plus
     if (g.startPos && g.sCentre - g.columnLength / 2 > 12) g.startPos = null;
+    if (!g.startPos) g.startBehind = null;
 
     // validité de la suite de l'itinéraire (tête de colonne → destination)
     if (!arriving && (this.state.version !== g.lastRouteStateVersion || (g.phase === 'waiting' && this.tick - g.lastRetryTick >= p.waitRetryTicks))) {

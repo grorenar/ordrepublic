@@ -187,6 +187,8 @@ export interface CrowdGroup {
   exitStart: number;
   /** Positions de départ (x,y) d'une colonne qui se forme à partir d'un rassemblement : chaque individu rejoint le début de la route depuis SA place. */
   startPos: Float32Array | null;
+  /** Distance initiale (m) de chaque individu derrière la tête de colonne (|s| au départ) : sert à étaler le démarrage de tout le monde. */
+  startBehind: Float32Array | null;
   /** Espace praticable le long de la route (largeur locale de chaque position de la colonne). */
   profile: ColumnProfile | null;
   speedMps: number;
