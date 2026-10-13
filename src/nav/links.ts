@@ -53,7 +53,17 @@ export interface LinkResult {
 
 /** Distance (m) sur le réseau entre deux nœuds, bornée : `Infinity` au-delà de `limit`. Mémorise les explorations. */
 class NearDistances {
-  private readonly cache = new Map<number, Map<number, number>>();
+  private cache = new Map<number, Map<number, number>>();
+  /** Arêtes ajoutées en cours de route (liaisons), prises en compte dans les distances. */
+  private readonly extra = new Map<number, Array<[number, number]>>();
+  addEdge(a: number, b: number, len: number): void {
+    for (const [u, v] of [[a, b], [b, a]] as Array<[number, number]>) {
+      const arr = this.extra.get(u);
+      if (arr) arr.push([v, len]);
+      else this.extra.set(u, [[v, len]]);
+    }
+    this.cache = new Map();
+  }
   constructor(
     private readonly g: StreetGraph,
     private readonly limit: number,
@@ -73,6 +83,12 @@ class NearDistances {
         if (!((this.g.edgeFlags[e] as number) & EdgeFlag.Foot)) continue;
         const v = otherNode(this.g, e, u);
         const nd = d + (this.g.edgeLen[e] as number);
+        if (nd > this.limit || nd >= (m.get(v) ?? Infinity)) continue;
+        m.set(v, nd);
+        open.push([nd, v]);
+      }
+      for (const [v, l] of this.extra.get(u) ?? []) {
+        const nd = d + l;
         if (nd > this.limit || nd >= (m.get(v) ?? Infinity)) continue;
         m.set(v, nd);
         open.push([nd, v]);
@@ -272,7 +288,7 @@ export interface SpaceLinkOptions {
   maxLinks: number;
 }
 
-export const DEFAULT_SPACE_LINK_OPTIONS: SpaceLinkOptions = { attachM: 12, maxSpanM: 350, minSpanM: 12, perNode: 5, detourFactor: 1.4, detourExtraM: 25, maxLinks: 3000 };
+export const DEFAULT_SPACE_LINK_OPTIONS: SpaceLinkOptions = { attachM: 10, maxSpanM: 220, minSpanM: 15, perNode: 2, detourFactor: 1.5, detourExtraM: 30, maxLinks: 600 };
 
 /**
  * Une place ou une zone piétonne cartographiée en surface (`place=square`, `highway=pedestrian` + `area=yes`, parc) n'a le plus souvent
@@ -288,11 +304,14 @@ export function addOpenSpaceLinks(g: StreetGraph, opts: Partial<SpaceLinkOptions
   const extra: RawEdge[] = [];
   const have = new Set<string>();
   for (const sp of g.spaces) {
+    // les parcs ont déjà leurs allées cartographiées : seules les places et zones piétonnes sont concernées
+    if (sp.kind === 'park') continue;
     const cand: number[] = [];
     for (let nd = 0; nd < g.nodeCount; nd++) {
       const x = g.nodeX[nd] as number;
       const y = g.nodeY[nd] as number;
-      if (inRing(sp.ring, x, y) || distToRing(sp.ring, x, y) <= o.attachM) cand.push(nd);
+      // nœuds de BORDURE seulement (rues qui aboutissent à la place) : un nœud au milieu a déjà ses propres voies
+      if (distToRing(sp.ring, x, y) <= o.attachM) cand.push(nd);
     }
     if (cand.length < 2 || cand.length > 120) continue;
     const pairs: Array<[number, number, number]> = [];
@@ -329,6 +348,7 @@ export function addOpenSpaceLinks(g: StreetGraph, opts: Partial<SpaceLinkOptions
       }
       if (!ok) continue;
       have.add(key);
+      dist.addEdge(a, b, d);
       used.set(a, (used.get(a) ?? 0) + 1);
       used.set(b, (used.get(b) ?? 0) + 1);
       extra.push({ a, b, shape: [{ x: ax, y: ay }, { x: bx, y: by }], cls: EdgeClass.Pedestrian, flags: EdgeFlag.Foot, width: 8, name: sp.name });

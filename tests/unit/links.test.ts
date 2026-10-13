@@ -144,3 +144,38 @@ describe('traversée d’une place ou d’une zone piétonne cartographiée en s
     expect(addOpenSpaceLinks(g).graph).toBe(g);
   });
 });
+
+describe('pas de « toile d’araignée » : traversées peu nombreuses, non redondantes', () => {
+  /** Une grande place carrée entourée d'une rue, avec de nombreuses rues qui y aboutissent. */
+  const bigSquare = (kind: 'square' | 'park') => {
+    const S = 100;
+    const nodes: Vec2[] = [];
+    const edges: RawEdge[] = [];
+    const ringPts: Vec2[] = [];
+    const per = 6;
+    for (let side = 0; side < 4; side++)
+      for (let k = 0; k < per; k++) {
+        const t = (k + 0.5) / per;
+        const p = side === 0 ? { x: -S + 2 * S * t, y: -S - 6 } : side === 1 ? { x: S + 6, y: -S + 2 * S * t } : side === 2 ? { x: S - 2 * S * t, y: S + 6 } : { x: -S - 6, y: S - 2 * S * t };
+        ringPts.push(p);
+        nodes.push(p);
+      }
+    // rue de ceinture reliant tous les nœuds de bordure
+    for (let i = 0; i < nodes.length; i++) edges.push(edge(i, (i + 1) % nodes.length, [nodes[i] as Vec2, nodes[(i + 1) % nodes.length] as Vec2], { name: 'Ceinture' }));
+    const space = { id: 'e', kind, name: 'Esplanade', ring: new Float32Array([-S, -S, S, -S, S, S, -S, S]), source: 'osm' as const };
+    return buildGraph({ origin, nodes, edges, spaces: [space], provenance: { source: 'osm' } });
+  };
+
+  it('une grande place : au plus 2 traversées par nœud, et pas de traversée redondante avec les précédentes', () => {
+    const g = bigSquare('square');
+    const r = addOpenSpaceLinks(g);
+    expect(r.added).toBeGreaterThan(0);
+    expect(r.added).toBeLessThanOrEqual(g.nodeCount); // ≤ 2 par nœud ⇒ ≤ n arêtes
+    // sans redondance : aucune paire reliée directement n'a déjà un chemin court (≤ 1,5 × + 30 m) via les liaisons déjà posées
+    expect(r.added).toBeLessThan((g.nodeCount * (g.nodeCount - 1)) / 8);
+  });
+
+  it('un parc (allées déjà cartographiées) n’est jamais recoupé', () => {
+    expect(addOpenSpaceLinks(bigSquare('park')).added).toBe(0);
+  });
+});

@@ -91,7 +91,7 @@ Les paramètres sont `DEFAULT_LINK_OPTIONS`. Déterministe ; environ 1 s pour pl
 
 ## Traversée des places et zones piétonnes cartographiées en surface
 
-Une place ou zone piétonne (`place=square`, `highway=pedestrian` + `area=yes`, parc) n'a le plus souvent **aucune arête à l'intérieur** : le graphe de navigation ne sait donc pas qu'on peut la traverser, et un cortège la contourne ou refuse d'y passer (exemple : place Saint-Jacques à Metz). `addOpenSpaceLinks` relie par des arêtes piétonnes droites les nœuds du réseau situés dans l'espace ou à ≤ 12 m de son contour, quand le segment reste dans l'espace (hors bâtiment) et que le trajet existant est au moins 1,4 × plus long (+ 25 m). Portée 12–350 m, 5 traversées par nœud au plus. Comme sur toute voie piétonne large, un véhicule peut la traverser au pas.
+Une place ou zone piétonne (`place=square`, `highway=pedestrian` + `area=yes`, parc) n'a le plus souvent **aucune arête à l'intérieur** : le graphe de navigation ne sait donc pas qu'on peut la traverser, et un cortège la contourne ou refuse d'y passer (exemple : place Saint-Jacques à Metz). `addOpenSpaceLinks` relie par des arêtes piétonnes droites les nœuds de BORDURE du réseau (à ≤ 10 m du contour : les rues qui aboutissent à la place), quand le segment reste dans l’espace (hors bâtiment) et que le trajet existant — liaisons déjà posées comprises — est au moins 1,5 × plus long (+ 30 m). Portée 15–220 m, 2 traversées par nœud au plus ; les parcs (allées déjà cartographiées) sont exclus. Comme sur toute voie piétonne large, un véhicule peut la traverser au pas.
 
 ## Mobilier : OSM d'abord
 
