@@ -199,3 +199,22 @@ describe('blocage par section : géométrie, répartition et possibilité de cir
     expect(run(10, fp as never, { ...P, jamDensity: 2 }).st.footState[0]).toBe(3);
   });
 });
+
+describe('carrefour entièrement couvert par une grande foule', () => {
+  it('toutes les voies qui se croisent sous la foule sont obstruées pour les véhicules (pas seulement « ralenties »), un petit groupe ne barre rien', async () => {
+    const { Sim } = await import('../../src/engine/sim');
+    const { gridGraph } = await import('./navHelpers');
+    const { anchorAt, PLAN } = await import('./engineHelpers');
+    const run = (size: number) => {
+      const g = gridGraph({ cols: 5, rows: 5, spacing: 60, width: 12 });
+      const sim = new Sim({ graph: g, seed: 1 });
+      sim.createGroup({ label: 'Foule', kind: 'static', size, origin: { x: 0, y: 0 }, anchor: anchorAt({ x: 0, y: 0 }, 'carrefour', 15) }, PLAN);
+      sim.run(100);
+      let veh3 = 0;
+      for (let e = 0; e < g.edgeCount; e++) if (sim.state.vehState[e] === 3) veh3++;
+      return veh3;
+    };
+    expect(run(3000)).toBeGreaterThanOrEqual(4); // les quatre voies du carrefour central, au moins
+    expect(run(15)).toBe(0);
+  }, 60_000);
+});

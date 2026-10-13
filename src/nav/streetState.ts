@@ -21,6 +21,8 @@ export interface EdgeState {
   presence: Float32Array;
   /** Largeur (m) de la section de rue occupée par les foules présentes (0 = aucune information). */
   section: Float32Array;
+  /** Largeur (m) de la section occupée VUE PAR LES VÉHICULES : une foule statique couvre tout ce qui est sous elle, sans partage entre les voies qui se croisent. */
+  sectionVeh: Float32Array;
   load: Float32Array;
   density: Float32Array;
   occupiedWidth: Float32Array;
@@ -43,6 +45,7 @@ export function createEdgeState(g: StreetGraph): EdgeState {
     walkRight: Float32Array.from(g.edgeWidth, (w) => w / 2),
     presence: new Float32Array(n),
     section: new Float32Array(n),
+    sectionVeh: new Float32Array(n),
     load: new Float32Array(n),
     density: new Float32Array(n),
     occupiedWidth: new Float32Array(n),
@@ -114,6 +117,7 @@ export interface LoadAccum {
   load: Float32Array;
   presence: Float32Array;
   section: Float32Array;
+  sectionVeh?: Float32Array;
 }
 
 /**
@@ -133,6 +137,7 @@ export function accumulateLoads(
   out.load.fill(0);
   out.presence.fill(0);
   out.section.fill(0);
+  out.sectionVeh?.fill(0);
   const add = (fi: number, e: number, load: number, presence: number, sectionW: number) => {
     out.load[e]! += load;
     if (presence > (out.presence[e] as number)) out.presence[e] = presence;
@@ -180,6 +185,10 @@ export function accumulateLoads(
       for (const [e, area, inside] of parts) {
         const share = (f.size * area) / total;
         add(fi, e, share, inside, share / (inside * f.density));
+        // pour un véhicule, la foule occupe sa surface entière (effectif / densité) répartie sur la longueur couverte, plafonnée à la largeur
+        // praticable : les voies qui se croisent sous une grande foule sont chacune entièrement occupées (le partage ci-dessus ne vaut que pour
+        // les piétons), alors qu'un petit groupe ne barre pas une rue
+        if (out.sectionVeh && inside >= p.minPresenceM) out.sectionVeh[e] = Math.max(out.sectionVeh[e] as number, Math.min((out.walkWidth ?? g.edgeWidth)[e] as number, f.size / f.density / inside));
       }
     }
   }
@@ -205,6 +214,7 @@ export function deriveStates(g: StreetGraph, st: EdgeState, p: NavParams): boole
     const rho = n / Math.max(1e-6, pres * W);
     const occ = informed ? Math.min(W, st.section[e] as number) : Math.min(W, n / Math.max(1e-6, len * p.referenceDensity));
     const free = W - occ;
+    const occV = Math.min(W, Math.max(occ, st.sectionVeh[e] as number));
     st.density[e] = rho;
     st.occupiedWidth[e] = occ;
 
@@ -214,10 +224,10 @@ export function deriveStates(g: StreetGraph, st: EdgeState, p: NavParams): boole
     else if (rho >= p.slowedDensity) foot = 1;
 
     // la foule occupe `occ` mètres de la largeur praticable : elle couvre d'abord la chaussée
-    const freeVeh = Math.max(0, Wveh - occ);
+    const freeVeh = Math.max(0, Wveh - occV);
     let veh: StreetStateId = 0;
-    if (occ > 0.05 && freeVeh < Math.min(p.vehicleMinFreeWidthM, Wveh)) veh = 3;
-    else if (occ / W >= p.partialObstruction) veh = 2;
+    if (occV > 0.05 && freeVeh < Math.min(p.vehicleMinFreeWidthM, Wveh)) veh = 3;
+    else if (occV / W >= p.partialObstruction) veh = 2;
     else if (rho >= p.slowedDensity) veh = 1;
 
     const sf = Math.max(p.minSpeedFactor, Math.min(1, 1 - rho / p.jamDensity));
