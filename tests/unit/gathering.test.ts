@@ -128,3 +128,22 @@ describe('forme du rassemblement : places d’abord, étiré dans le sens du dé
     expect(ahead({ x: 1, y: 0 })).toBeGreaterThan(0.62);
   }, 120_000);
 });
+
+describe('trou dans un espace ouvert (bassin d’un parc)', () => {
+  it('personne ne se tient dans le trou, mais la foule occupe le reste du parc', async () => {
+    const { gridGraph } = await import('./navHelpers');
+    const { Sim } = await import('../../src/engine/sim');
+    const { anchorAt, PLAN } = await import('./engineHelpers');
+    const park = { id: 'p', kind: 'park' as const, ring: new Float32Array([-60, 3, 60, 3, 60, 80, -60, 80]), holes: [new Float32Array([-15, 30, 15, 30, 15, 60, -15, 60])], source: 'osm' as const };
+    const g = gridGraph({ cols: 5, rows: 1, spacing: 100, width: 8, spaces: [park] });
+    const sim = new Sim({ graph: g, seed: 1 });
+    expect(sim.mask!.isOpen(0, 45)).toBe(false);
+    expect(sim.mask!.isWalkable(0, 45)).toBe(false);
+    expect(sim.mask!.isWalkable(40, 45)).toBe(true);
+    const grp = sim.group(sim.createGroup({ label: 'R', kind: 'static', size: 2500, origin: { x: 0, y: 0 }, anchor: anchorAt({ x: 0, y: 0 }, 'rue', 15) }, PLAN))!;
+    sim.run(300);
+    let inHole = 0;
+    for (let i = 0; i < grp.members.n; i++) if (Math.abs(grp.members.x[i] as number) < 15 && (grp.members.y[i] as number) > 30 && (grp.members.y[i] as number) < 60) inHole++;
+    expect(inHole).toBe(0);
+  }, 60_000);
+});

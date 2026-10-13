@@ -43,8 +43,8 @@ export interface Pack {
     edgeOsmId: string;
     provenance: StreetGraph['provenance'];
   };
-  spaces: Array<{ id: string; kind: OpenSpace['kind']; ring: string; name?: string; source: Provenance; osmId?: number }>;
-  obstacles: Array<{ ring: string; name?: string; source: Provenance; kind?: 'administration' }>;
+  spaces: Array<{ id: string; kind: OpenSpace['kind']; ring: string; holes?: string[]; name?: string; source: Provenance; osmId?: number }>;
+  obstacles: Array<{ ring: string; holes?: string[]; name?: string; source: Provenance; kind?: 'administration' | 'water' }>;
   /** Lieux d'intérêt (absent des anciens paquets). */
   pois?: GraphPoi[];
 }
@@ -101,8 +101,8 @@ export function packGraph(g: StreetGraph, meta: PackMeta): Pack {
       edgeOsmId: enc(g.edgeOsmId),
       provenance: g.provenance,
     },
-    spaces: g.spaces.map((s) => ({ id: s.id, kind: s.kind, ring: enc(s.ring), name: s.name, source: s.source, osmId: s.osmId })),
-    obstacles: g.obstacles.map((o) => ({ ring: enc(o.ring), name: o.name, source: o.source, ...(o.kind ? { kind: o.kind } : {}) })),
+    spaces: g.spaces.map((s) => ({ id: s.id, kind: s.kind, ring: enc(s.ring), ...(s.holes?.length ? { holes: s.holes.map(enc) } : {}), name: s.name, source: s.source, osmId: s.osmId })),
+    obstacles: g.obstacles.map((o) => ({ ring: enc(o.ring), ...(o.holes?.length ? { holes: o.holes.map(enc) } : {}), name: o.name, source: o.source, ...(o.kind ? { kind: o.kind } : {}) })),
     pois: g.pois,
   };
 }
@@ -138,8 +138,8 @@ export function unpackGraph(input: unknown): { graph: StreetGraph; meta: PackMet
     for (let i = shapeStart[e] as number; i < (shapeStart[e + 1] as number); i++) shape.push({ x: edges.shape[2 * i] as number, y: edges.shape[2 * i + 1] as number });
     raw.push({ a: edges.a[e] as number, b: edges.b[e] as number, shape, cls: edges.cls[e] as EdgeClassId, flags: edges.flags[e] as number, width: edges.width[e] as number, name: g.edgeName[e] ?? undefined, osmId: (edges.osm[e] as number) || undefined });
   }
-  const spaces: OpenSpace[] = (p.spaces ?? []).map((s) => ({ id: s.id, kind: s.kind, ring: dec(s.ring, Float32Array, b64decode(s.ring).length / 4, 'espace'), name: s.name, source: s.source, osmId: s.osmId }));
-  const obstacles: Obstacle[] = (p.obstacles ?? []).map((o) => ({ ring: dec(o.ring, Float32Array, b64decode(o.ring).length / 4, 'bâtiment'), name: o.name, source: o.source, ...(o.kind === 'administration' ? { kind: 'administration' as const } : {}) }));
+  const spaces: OpenSpace[] = (p.spaces ?? []).map((s) => ({ id: s.id, kind: s.kind, ring: dec(s.ring, Float32Array, b64decode(s.ring).length / 4, 'espace'), name: s.name, source: s.source, osmId: s.osmId, ...(s.holes?.length ? { holes: s.holes.map((h) => dec(h, Float32Array, b64decode(h).length / 4, 'trou')) } : {}) }));
+  const obstacles: Obstacle[] = (p.obstacles ?? []).map((o) => ({ ring: dec(o.ring, Float32Array, b64decode(o.ring).length / 4, 'bâtiment'), name: o.name, source: o.source, ...(o.holes?.length ? { holes: o.holes.map((h) => dec(h, Float32Array, b64decode(h).length / 4, 'trou')) } : {}), ...(o.kind === 'administration' || o.kind === 'water' ? { kind: o.kind } : {}) }));
   const graph = buildGraph({ origin: g.origin, nodes, edges: raw, spaces, obstacles, pois: Array.isArray(p.pois) ? p.pois : [], provenance: g.provenance });
   return { graph, meta: p.meta };
 }

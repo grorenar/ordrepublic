@@ -58,6 +58,9 @@ export function overpassQuery(b: Bbox, o: { buildings?: boolean; timeoutS?: numb
     // administrations (mairie, tribunal, bâtiments gouvernementaux) : pour placer un piquet devant une vraie administration
     `way["amenity"~"^(townhall|courthouse)$"](${bb});`,
     `way["office"="government"](${bb});`,
+    // plans d'eau (fleuves, lacs, bassins) : surfaces non praticables
+    `way["natural"="water"](${bb});`,
+    `way["waterway"="riverbank"](${bb});`,
   ];
   // lieux d'intérêt (commerces, écoles, établissements, mobilier) : affichage et contexte de rue, jamais des cibles.
   // Nœuds et chemins seulement (pas de relations : requête bien plus légère) ; omis dans la requête allégée des nouvelles tentatives.
@@ -69,6 +72,8 @@ export function overpassQuery(b: Bbox, o: { buildings?: boolean; timeoutS?: numb
     `relation["type"="multipolygon"]["place"="square"](${bb});`,
     `relation["type"="multipolygon"]["highway"="pedestrian"](${bb});`,
     `relation["type"="multipolygon"]["leisure"~"^(park|garden|common)$"](${bb});`,
+    `relation["type"="multipolygon"]["natural"="water"](${bb});`,
+    `relation["type"="multipolygon"]["waterway"="riverbank"](${bb});`,
   ];
   if (o.buildings !== false) rels.push(`relation["type"="multipolygon"]["building"](${bb});`);
   return `[out:json][timeout:${o.timeoutS ?? 90}];\n(\n  ${parts.join('\n  ')}\n);\n(._;>;);\nout body qt;\n(\n  ${rels.join('\n  ')}\n);\nout geom;`;

@@ -40,6 +40,8 @@ export interface OpenSpace {
   kind: 'square' | 'park' | 'pedestrian_area';
   /** Contour fermé (x0,y0,x1,y1,…), sans répéter le premier point. */
   ring: Float32Array;
+  /** Trous (plans d'eau, bâtiments enclavés) : non praticables. */
+  holes?: Float32Array[];
   name?: string;
   source: Provenance;
   osmId?: number;
@@ -48,7 +50,9 @@ export interface OpenSpace {
 export interface Obstacle {
   ring: Float32Array;
   /** Nature du bâtiment quand elle est connue (étiquettes OSM) : sert à placer un piquet devant une VRAIE administration. */
-  kind?: 'administration';
+  kind?: 'administration' | 'water';
+  /** Trous (îles d'un plan d'eau, cours intérieures) : la surface y est libre. */
+  holes?: Float32Array[];
   /** Nom OSM éventuel (affiché tel quel, décision v0.4) ; absent pour les objets synthétiques. */
   name?: string;
   source: Provenance;

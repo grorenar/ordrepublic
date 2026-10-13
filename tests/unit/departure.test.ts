@@ -39,6 +39,27 @@ describe('démarrage d’un cortège depuis un rassemblement', () => {
     expect(front).toBeGreaterThan(rear);
   }, 120_000);
 
+  it('dès que la tête est partie, l’information « il y a de la place » remonte la foule : même la queue marche vers la suite (pas seulement un lent fluage)', () => {
+    const { sim, grp } = start(1);
+    sim.step();
+    const a = snapshot(grp);
+    sim.run(500); // 50 s
+    const n = grp.members.n;
+    let rear = 0;
+    const k = Math.floor(n / 10);
+    for (let i = 0; i < k; i++) rear += Math.hypot((grp.members.x[i] as number) - (a.x[i] as number), (grp.members.y[i] as number) - (a.y[i] as number));
+    expect(rear / k).toBeGreaterThan(6); // plus de 6 m en 50 s pour les 10 % les plus éloignés
+    // sans cette propagation, ils fluent bien moins
+    const slow = start(1);
+    slow.sim.params.departureCompress = 0;
+    slow.sim.step();
+    const b = snapshot(slow.grp);
+    slow.sim.run(500);
+    let rear0 = 0;
+    for (let i = 0; i < k; i++) rear0 += Math.hypot((slow.grp.members.x[i] as number) - (b.x[i] as number), (slow.grp.members.y[i] as number) - (b.y[i] as number));
+    expect(rear / k).toBeGreaterThan(rear0 / k);
+  }, 200_000);
+
   it('avec departureUnroll = 0 (ancien comportement) l’arrière attend : bien moins de monde en mouvement après 30 s', () => {
     const share = (u: number) => {
       const { sim, grp } = start(u);

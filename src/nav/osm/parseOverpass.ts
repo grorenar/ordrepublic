@@ -8,6 +8,8 @@ export interface OsmWay {
   id: number;
   nodes: number[];
   tags: Tags;
+  /** Anneaux intérieurs (multipolygone) : listes d'identifiants de nœuds fermées. */
+  holes?: number[][];
 }
 export interface OsmTaggedNode {
   id: number;
@@ -90,30 +92,37 @@ function relationToWays(e: Record<string, unknown>, nodes: Map<number, OsmNode>,
   const tags: Tags = {};
   for (const [k, v] of Object.entries(e.tags as Record<string, unknown>)) if (typeof v === 'string') tags[k] = v;
   if (tags.type !== 'multipolygon' && tags.type !== 'boundary') return [];
-  const segs: Pt[][] = [];
-  for (const m of e.members as Array<Record<string, unknown>>) {
-    if (m.type !== 'way' || (m.role !== 'outer' && m.role !== '') || !Array.isArray(m.geometry)) continue;
-    const g = (m.geometry as Array<Pt | null>).filter((p): p is Pt => !!p && typeof p.lat === 'number' && typeof p.lon === 'number');
-    if (g.length >= 2) segs.push(g);
-  }
-  const key = (p: Pt) => `${p.lat},${p.lon}`;
-  const rings: Pt[][] = [];
-  const pool = segs.slice();
-  while (pool.length) {
-    let ring = (pool.shift() as Pt[]).slice();
-    let guard = pool.length + 1;
-    while (key(ring[0] as Pt) !== key(ring[ring.length - 1] as Pt) && guard-- > 0) {
-      const end = key(ring[ring.length - 1] as Pt);
-      const i = pool.findIndex((s) => key(s[0] as Pt) === end || key(s[s.length - 1] as Pt) === end);
-      if (i < 0) break;
-      const nxt = pool.splice(i, 1)[0] as Pt[];
-      ring = ring.concat(key(nxt[0] as Pt) === end ? nxt.slice(1) : nxt.slice().reverse().slice(1));
+  const collect = (roles: string[]): Pt[][] => {
+    const segs: Pt[][] = [];
+    for (const m of e.members as Array<Record<string, unknown>>) {
+      if (m.type !== 'way' || !roles.includes(String(m.role)) || !Array.isArray(m.geometry)) continue;
+      const g = (m.geometry as Array<Pt | null>).filter((p): p is Pt => !!p && typeof p.lat === 'number' && typeof p.lon === 'number');
+      if (g.length >= 2) segs.push(g);
     }
-    if (ring.length >= 4 && key(ring[0] as Pt) === key(ring[ring.length - 1] as Pt)) rings.push(ring);
-  }
-  const out: OsmWay[] = [];
-  for (const ring of rings) {
-    const ids = ring.map((p) => {
+    return segs;
+  };
+  const key = (p: Pt) => `${p.lat},${p.lon}`;
+  const assemble = (segs: Pt[][]): Pt[][] => {
+    const rings: Pt[][] = [];
+    const pool = segs.slice();
+    while (pool.length) {
+      let ring = (pool.shift() as Pt[]).slice();
+      let guard = pool.length + 1;
+      while (key(ring[0] as Pt) !== key(ring[ring.length - 1] as Pt) && guard-- > 0) {
+        const end = key(ring[ring.length - 1] as Pt);
+        const i = pool.findIndex((x) => key(x[0] as Pt) === end || key(x[x.length - 1] as Pt) === end);
+        if (i < 0) break;
+        const nxt = pool.splice(i, 1)[0] as Pt[];
+        ring = ring.concat(key(nxt[0] as Pt) === end ? nxt.slice(1) : nxt.slice().reverse().slice(1));
+      }
+      if (ring.length >= 4 && key(ring[0] as Pt) === key(ring[ring.length - 1] as Pt)) rings.push(ring);
+    }
+    return rings;
+  };
+  const rings = assemble(collect(['outer', '']));
+  const holeRings = assemble(collect(['inner']));
+  const idsOf = (ring: Pt[]): number[] =>
+    ring.map((p) => {
       const k = key(p);
       let id = st.byCoord.get(k);
       if (id === undefined) {
@@ -123,7 +132,19 @@ function relationToWays(e: Record<string, unknown>, nodes: Map<number, OsmNode>,
       }
       return id;
     });
-    out.push({ id: st.nextWay--, nodes: ids, tags });
+  const inside = (poly: Pt[], p: Pt): boolean => {
+    let c = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const a = poly[i] as Pt;
+      const b = poly[j] as Pt;
+      if (a.lat > p.lat !== b.lat > p.lat && p.lon < ((b.lon - a.lon) * (p.lat - a.lat)) / (b.lat - a.lat) + a.lon) c = !c;
+    }
+    return c;
+  };
+  const out: OsmWay[] = [];
+  for (const ring of rings) {
+    const mine = holeRings.filter((h) => inside(ring, h[0] as Pt)).map(idsOf);
+    out.push({ id: st.nextWay--, nodes: idsOf(ring), tags, ...(mine.length ? { holes: mine } : {}) });
   }
   return out;
 }

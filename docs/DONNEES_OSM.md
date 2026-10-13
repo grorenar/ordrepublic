@@ -96,3 +96,11 @@ Une place ou zone piétonne (`place=square`, `highway=pedestrian` + `area=yes`, 
 ## Mobilier : OSM d'abord
 
 Les bancs (`amenity=bench`) et poubelles (`amenity=waste_basket`) OSM sont repris tels quels. Si OSM en recense au moins 15 d'un type dans le secteur, la cartographie est jugée complète et **aucun objet synthétique de ce type n'est ajouté** ; sinon les objets synthétiques ne comblent que les manques (à plus de 30 m d'un objet OSM du même type). Paramètres `world.osmFurnitureCoverageMin` et `world.osmFurnitureClearM`.
+
+## Plans d'eau (fleuve, lacs) et trous
+
+Les plans d'eau (`natural=water`, `waterway=riverbank`, `landuse=reservoir|basin`), en chemins fermés ou en multipolygones, sont demandés à Overpass et traités comme des **obstacles « eau »** : une foule ne s'y tient pas. Les **ponts** restent praticables (la voie prime sur l'obstacle, sur toute la largeur du pont). Les **anneaux intérieurs** des multipolygones sont gérés : une île d'un plan d'eau est libre, un bassin à l'intérieur d'un parc est exclu de la surface praticable. Avant ce correctif, un fleuve non chargé n'était pas bloqué : un rassemblement proche d'un pont pouvait s'étaler dans l'eau (quai de la Moselle à Metz).
+
+## Remarque sur le démarrage d'un cortège
+
+Voir `PARAMETRES.md` : `departureUnroll`, `departureWaveMps`, `departureWalkMps`, `departureCompress` (« dès qu'il y a de la place, les plus éloignés avancent vers la suite »).

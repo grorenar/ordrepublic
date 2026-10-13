@@ -374,6 +374,7 @@ export class Sim {
       exitStart: members.n,
       startPos: null,
       startBehind: null,
+      marchStartMs: 0,
       profile: null,
       speedMps: 0,
       speedCause: 'à l’arrêt',
@@ -576,6 +577,7 @@ export class Sim {
     permuteMembers(m, idx);
     for (let i = 0; i < n; i++) m.slotOf[i] = n - 1 - i;
     g.startBehind = null;
+    g.marchStartMs = this.timeMs;
     g.startPos = new Float32Array(2 * n);
     for (let i = 0; i < n; i++) {
       g.startPos[2 * i] = m.x[i] as number;

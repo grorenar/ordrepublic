@@ -43,8 +43,16 @@ export class WalkMask {
       }
     }
     const m = new WalkMask(minX, minY, maxX, maxY, res);
-    for (const o of g.obstacles) m.rasterize(o);
-    for (const sp of g.spaces) m.rasterize({ ring: sp.ring, source: sp.source }, m.open, 1);
+    // plans d'eau d'abord (leurs îles — trous — sont libres), puis bâtiments qui peuvent se trouver sur ces îles
+    for (const o of g.obstacles) if (o.kind === 'water') {
+      m.rasterize(o);
+      for (const h of o.holes ?? []) m.rasterize({ ring: h }, m.data, 0);
+    }
+    for (const o of g.obstacles) if (o.kind !== 'water') m.rasterize(o);
+    for (const sp of g.spaces) {
+      m.rasterize({ ring: sp.ring, source: sp.source }, m.open, 1);
+      for (const h of sp.holes ?? []) m.rasterize({ ring: h }, m.open, 0);
+    }
     // les voies en tunnel / passage couvert / pont ne sont pas bloquées par les bâtiments cartographiés au-dessus
     for (let e = 0; e < g.edgeCount; e++) {
       const covered = ((g.edgeFlags[e] as number) & (EdgeFlag.Tunnel | EdgeFlag.Bridge)) !== 0;
@@ -119,7 +127,10 @@ export class WalkMask {
     }
     // cellules de rue seules (avant d'ajouter les espaces ouverts) : sert à combler les petits écarts place ↔ rue
     const street = Uint8Array.from(this.walk);
-    for (const sp of g.spaces) this.rasterize({ ring: sp.ring }, this.walk, 1);
+    for (const sp of g.spaces) {
+      this.rasterize({ ring: sp.ring }, this.walk, 1);
+      for (const h of sp.holes ?? []) this.rasterize({ ring: h }, this.walk, 0);
+    }
     this.bridgeGaps(street, WalkMask.GAP_BRIDGE_M);
     this.walkReady = true;
   }

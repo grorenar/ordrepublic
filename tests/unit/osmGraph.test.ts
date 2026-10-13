@@ -270,3 +270,68 @@ describe('multipolygones (grandes places, parcs, bâtiments à cour)', () => {
     expect(sim.mask!.isBlocked(cx, cy)).toBe(false);
   });
 });
+
+describe('plans d’eau (fleuve) : non praticables, ponts exceptés ; îles et trous', () => {
+  const O = { lng: 6.1757, lat: 49.1193 };
+  const kx = 0.0000136; // ≈ 1 m en longitude à cette latitude
+  const ky = 0.000009; // ≈ 1 m en latitude
+  const pt = (x: number, y: number) => ({ lat: O.lat + y * ky, lon: O.lng + x * kx });
+  let nid = 1;
+  const node = (x: number, y: number) => ({ type: 'node', id: nid++, ...pt(x, y) });
+  /** Deux quais (y = ±60) reliés par un pont (x = 0) au-dessus d'un fleuve large de 100 m. */
+  const river = (extra: unknown[] = [], water: Record<string, unknown> | null = null) => {
+    nid = 1;
+    const ns = [node(-200, -60), node(0, -60), node(200, -60), node(-200, 60), node(0, 60), node(200, 60)];
+    const w = (id: number, a: number, b: number, tags: Record<string, string>) => ({ type: 'way', id, nodes: [(ns[a] as { id: number }).id, (ns[b] as { id: number }).id], tags });
+    const ways = [w(1, 0, 1, { highway: 'residential' }), w(2, 1, 2, { highway: 'residential' }), w(3, 3, 4, { highway: 'residential' }), w(4, 4, 5, { highway: 'residential' }), w(5, 1, 4, { highway: 'residential', bridge: 'yes' })];
+    const rect = [node(-250, -50), node(250, -50), node(250, 50), node(-250, 50)];
+    const wid = rect.map((r) => r.id);
+    const lake = { type: 'way', id: 50, nodes: [...wid, wid[0]], tags: { natural: 'water', water: 'river' } };
+    return { elements: [...ns, ...rect, ...ways, ...(water === null ? [lake] : []), ...extra] };
+  };
+
+  it('un fleuve cartographié devient un obstacle « eau » : la rive n’est pas praticable, le pont l’est', () => {
+    const g = buildGraphFromOverpassJson(river(), { origin: O, links: false }).graph;
+    const water = g.obstacles.filter((o) => o.kind === 'water');
+    expect(water.length).toBe(1);
+    const sim = new Sim({ graph: g, seed: 1 });
+    expect(sim.mask!.isBlocked(100, 0)).toBe(true); // en plein fleuve
+    expect(sim.mask!.isBlocked(0, 0)).toBe(false); // sur le pont (voie prioritaire)
+    expect(sim.mask!.isWalkable(100, 0)).toBe(false);
+  });
+
+  it('un rassemblement au bord du fleuve ne place personne dans l’eau (sauf sur le pont)', async () => {
+    const { anchorAt, PLAN } = await import('./engineHelpers');
+    const g = buildGraphFromOverpassJson(river(), { origin: O, links: false }).graph;
+    const sim = new Sim({ graph: g, seed: 1 });
+    const grp = sim.group(sim.createGroup({ label: 'R', kind: 'static', size: 3000, origin: { x: 0, y: -58 }, anchor: anchorAt({ x: 0, y: -58 }, 'quai', 15) }, PLAN))!;
+    sim.run(100);
+    let inWater = 0;
+    for (let i = 0; i < grp.members.n; i++) {
+      const x = grp.members.x[i] as number;
+      const y = grp.members.y[i] as number;
+      if (Math.abs(y) < 48 && Math.abs(x) > 8) inWater++; // dans le lit du fleuve, hors de la bande du pont
+    }
+    expect(inWater).toBe(0);
+  }, 60_000);
+
+  it('multipolygone d’eau avec une île : l’île est libre, le reste est de l’eau', () => {
+    const ring = (r: number, cx = 0, cy = 0) => [pt(cx - r, cy - r * 0.5), pt(cx + r, cy - r * 0.5), pt(cx + r, cy + r * 0.5), pt(cx - r, cy + r * 0.5), pt(cx - r, cy - r * 0.5)];
+    const rel = { type: 'relation', id: 700, tags: { type: 'multipolygon', natural: 'water' }, members: [{ type: 'way', ref: 1, role: 'outer', geometry: ring(250) }, { type: 'way', ref: 2, role: 'inner', geometry: ring(30, 100, 0) }] };
+    const g = buildGraphFromOverpassJson(river([rel], {}), { origin: O, links: false }).graph;
+    const w = g.obstacles.find((o) => o.kind === 'water')!;
+    expect(w.holes?.length).toBe(1);
+    const sim = new Sim({ graph: g, seed: 1 });
+    expect(sim.mask!.isBlocked(-100, 0)).toBe(true);
+    expect(sim.mask!.isBlocked(100, 0)).toBe(false); // l'île
+  });
+
+  it('les plans d’eau et leurs trous survivent à l’écriture d’un paquet ; la requête demande l’eau', () => {
+    const g = buildGraphFromOverpassJson(river(), { origin: O, links: false }).graph;
+    const { graph } = unpackGraph(JSON.parse(JSON.stringify(packGraph(g, { name: 'T', generatedAt: 'x', license: 'ODbL' } as never))));
+    expect(graph.obstacles.filter((o) => o.kind === 'water').length).toBe(1);
+    const q = overpassQuery({ south: 49, west: 6, north: 49.01, east: 6.01 });
+    expect(q).toContain('["natural"="water"]');
+    expect(q).toContain('riverbank');
+  });
+});

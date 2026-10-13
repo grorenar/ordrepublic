@@ -167,3 +167,9 @@ export function classifyPoi(tags: Tags): PoiClass | null {
   if (tags.office) return { kind: 'company', category: tags.office };
   return null;
 }
+
+/** Plan d'eau ou berge (fleuve, lac, bassin) : surface où une foule ne peut pas se tenir (hors ponts, qui sont des voies). */
+export function isWater(tags: Tags): boolean {
+  if (tags.natural === 'water' && tags.intermittent !== 'yes') return true;
+  return tags.waterway === 'riverbank' || tags.waterway === 'dock' || tags.landuse === 'reservoir' || tags.landuse === 'basin';
+}

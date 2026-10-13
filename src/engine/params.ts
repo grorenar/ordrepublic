@@ -116,6 +116,12 @@ export interface SimParams {
    * avançant plus lentement pour étirer le cortège (ils arrivent quand la colonne les atteint) ; 0 = chacun attend que la colonne soit proche (effet « aspirateur »).
    */
   departureUnroll: number;
+  /** Départ : vitesse (m/s) à laquelle le « on peut avancer » se propage vers l'arrière du rassemblement dès que la tête s'est mise en marche. */
+  departureWaveMps: number;
+  /** Départ : vitesse de marche (m/s) de ceux qui avancent vers l'entrée dès qu'il y a de la place. */
+  departureWalkMps: number;
+  /** Départ : part maximale (0–1) du chemin vers l'entrée parcourue ainsi à l'avance (le rassemblement se resserre) ; au-delà, chacun suit la colonne. */
+  departureCompress: number;
   /** Remplissage d'un rassemblement (distance de marche depuis l'ancre). */
   fill: {
     /** Coût relatif (< 1) d'un déplacement en espace ouvert : places et parcs sont occupés avant les rues voisines. */
@@ -249,6 +255,9 @@ export const DEFAULT_SIM_PARAMS: SimParams = {
   blendMaxSpeedMps: 3,
   lod: { defaultLevel: 2, n2RadiusM: 400, n1RadiusM: 2500, blockSize: 256, blockMinGroupSize: 4000, hysteresis: 0.1 },
   departureUnroll: 1,
+  departureWaveMps: 5,
+  departureWalkMps: 1.2,
+  departureCompress: 0.6,
   fill: { openCost: 0.45, behindPenalty: 0.9 },
   world: { binSpacingM: 70, benchSpacingM: 180, shelterSpacingM: 260, containerSpacingM: 200, shopSpacingM: 100, shopSpacingCommercialM: 35, commercialShopCount: 3, commercialRadiusM: 80, maxDecor: 8000, minOffsetM: 1.2, osmFurnitureCoverageMin: 15, osmFurnitureClearM: 30 },
   incidents: {

@@ -189,6 +189,8 @@ export interface CrowdGroup {
   startPos: Float32Array | null;
   /** Distance initiale (m) de chaque individu derrière la tête de colonne (|s| au départ) : sert à étaler le démarrage de tout le monde. */
   startBehind: Float32Array | null;
+  /** Instant (ms de jeu) où le cortège s'est mis en marche depuis un rassemblement. */
+  marchStartMs: number;
   /** Espace praticable le long de la route (largeur locale de chaque position de la colonne). */
   profile: ColumnProfile | null;
   speedMps: number;

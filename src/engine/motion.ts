@@ -72,6 +72,37 @@ function initialBehind(g: CrowdGroup, prof: ReturnType<typeof profileFor>, aHead
   return out;
 }
 
+interface Corner {
+  s: number;
+  /** Angle de virage (rad) : > 0 = virage à gauche. */
+  turn: number;
+}
+
+const cornerCache = new WeakMap<object, Corner[]>();
+
+/** Virages marqués (> ~30°) d'un itinéraire, avec leur abscisse : le côté intérieur du cortège s'y resserre au lieu de couper le virage. */
+function routeCorners(route: NonNullable<CrowdGroup['route']>): Corner[] {
+  let cs = cornerCache.get(route);
+  if (cs) return cs;
+  cs = [];
+  const pts = route.pts;
+  for (let k = 1; k + 1 < pts.length / 2; k++) {
+    const ax = (pts[2 * k] as number) - (pts[2 * k - 2] as number);
+    const ay = (pts[2 * k + 1] as number) - (pts[2 * k - 1] as number);
+    const bx = (pts[2 * k + 2] as number) - (pts[2 * k] as number);
+    const by = (pts[2 * k + 3] as number) - (pts[2 * k + 1] as number);
+    const la = Math.hypot(ax, ay);
+    const lb = Math.hypot(bx, by);
+    if (la < 1e-6 || lb < 1e-6) continue;
+    const turn = Math.atan2(ax * by - ay * bx, ax * bx + ay * by);
+    if (Math.abs(turn) > 0.5) cs.push({ s: route.cum[k] as number, turn });
+  }
+  cornerCache.set(route, cs);
+  return cs;
+}
+
+const CORNER_W = 9;
+
 function marchTargets(g: CrowdGroup, c: MotionCtx, from: number, to: number): void {
   const m = g.members;
   const route = g.route as NonNullable<CrowdGroup['route']>;
@@ -82,6 +113,8 @@ function marchTargets(g: CrowdGroup, c: MotionCtx, from: number, to: number): vo
   const cursor = new RouteCursor(route);
   const prof = profileFor(g, c.graph, c.state, c.params);
   const startF = g.startPos ? routeFrame(g, c, route, false) : null;
+  const corners = routeCorners(route);
+  let ci = 0;
   // l'aire de la colonne entre la tête et l'individu i vaut (n − i − ½) / densité : chaque individu est placé là où l'espace
   // praticable LOCAL le permet (la queue garde sa largeur tant qu'elle n'est pas entrée dans la rue étroite)
   const aHead = prof.area(g.sCentre + g.columnLength / 2);
@@ -115,13 +148,24 @@ function marchTargets(g: CrowdGroup, c: MotionCtx, from: number, to: number): vo
         const L = g.startBehind[i] as number;
         const fNew = L > 1e-6 ? Math.max(0, Math.min(1, (s + L) / L)) : 1;
         f = f + (fNew - f) * u;
+        // dès qu'il y a de la place (la tête est partie), ceux de l'arrière avancent vers la suite : l'information remonte la foule à
+        // `departureWaveMps`, puis chacun marche vers l'entrée (jusqu'à `departureCompress` du chemin) avant de suivre la colonne
+        const pr = c.params;
+        const tSince = (c.tMs - g.marchStartMs) / 1000 - L / Math.max(0.1, pr.departureWaveMps);
+        if (tSince > 0 && dist > 1e-6) f = Math.max(f, Math.min(pr.departureCompress, (tSince * pr.departureWalkMps) / dist));
       }
       m.tx[i] = sx + (e.x - sx) * f;
       m.ty[i] = sy + (e.y - sy) * f;
       continue;
     }
     cursor.at(s, cur);
-    const off = prof.lateral(Math.max(0, Math.min(len, s)), m.lat[i] as number);
+    let off = prof.lateral(Math.max(0, Math.min(len, s)), m.lat[i] as number);
+    // dans un virage, le côté intérieur se resserre vers la rue (on ne coupe pas le coin) ; l'extérieur garde sa largeur
+    while (ci < corners.length && (corners[ci] as Corner).s < s - CORNER_W) ci++;
+    for (let q = ci; q < corners.length && (corners[q] as Corner).s <= s + CORNER_W; q++) {
+      const cn = corners[q] as Corner;
+      if (cn.turn * off > 0) off *= 1 - 0.7 * (1 - Math.abs(s - cn.s) / CORNER_W) * Math.min(1, Math.abs(cn.turn) / 1.2);
+    }
     const px = cur.x + cur.nx * off;
     const py = cur.y + cur.ny * off;
     if (!c.mask || !c.mask.isBlocked(px, py)) {

@@ -10,7 +10,7 @@ import {
 } from '../graph';
 import { addOpenSpaceLinks, addPedestrianLinks } from '../links';
 import { parseOverpass, type OsmData } from './parseOverpass';
-import { classifyHighway, classifyPoi, classifySpace, isAdministration, isBuilding, type ExclusionReason } from './tagsPolicy';
+import { classifyHighway, classifyPoi, classifySpace, isAdministration, isBuilding, isWater, type ExclusionReason } from './tagsPolicy';
 
 export interface BuildOptions {
   /** Origine du repère local ; par défaut le centroïde des nœuds utilisés. */
@@ -156,8 +156,22 @@ export function buildGraphFromOsm(data: OsmData, opts: BuildOptions = {}): { gra
       }
       pois.push({ id: `osm-w${w.id}`, kind: poi.kind, category: poi.category, name: w.tags.name, x: cx / ids.length, y: cy / ids.length, source: 'osm', osmId: w.id });
     }
+    // anneaux intérieurs d'un multipolygone (îles d'un plan d'eau, plans d'eau d'un parc…)
+    const holes: Float32Array[] = [];
+    for (const h of w.holes ?? []) {
+      const hid = h.slice(0, -1).filter((n) => data.nodes.has(n));
+      if (hid.length < 3) continue;
+      const hr = new Float32Array(hid.length * 2);
+      hid.forEach((id, i) => {
+        const p = local(id);
+        hr[2 * i] = p.x;
+        hr[2 * i + 1] = p.y;
+      });
+      holes.push(hr);
+    }
     const kind = classifySpace(w.tags);
-    if (kind) spaces.push({ id: `osm-w${w.id}`, kind, ring, name: w.tags.name, source: 'osm', osmId: w.id });
+    if (isWater(w.tags) && !kind) obstacles.push({ ring, kind: 'water', name: w.tags.name, source: 'osm', ...(holes.length ? { holes } : {}) });
+    else if (kind) spaces.push({ id: `osm-w${w.id}`, kind, ring, name: w.tags.name, source: 'osm', osmId: w.id, ...(holes.length ? { holes } : {}) });
     else if (isBuilding(w.tags)) obstacles.push({ ring, name: w.tags.name, source: 'osm', ...(isAdministration(w.tags) ? { kind: 'administration' as const } : {}) });
   }
 
