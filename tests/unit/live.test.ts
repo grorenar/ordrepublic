@@ -32,7 +32,7 @@ describe('chargement à la demande du graphe OSM d’un secteur', () => {
     expect(b.graph.edgeCount).toBe(a.graph.edgeCount);
   });
 
-  it('HTTP 429 : jusqu’à 10 tentatives (services alternés) avant l’échec, message explicite avec le nombre de tentatives', async () => {
+  it('HTTP 429 : jusqu’à 10 tentatives, toutes sur le service principal (les relances y réussissent le mieux), avant l’échec, message explicite avec le nombre de tentatives', async () => {
     const urls: string[] = [];
     const f = (async (u: RequestInfo | URL) => { urls.push(String(u)); return new Response('', { status: 429 }); }) as typeof fetch;
     const err = await loadZoneGraph(metz, half, 'Metz', { fetchFn: f, cache: null, retryDelayMs: 1, useStatus: false }).catch((e) => e);
@@ -40,7 +40,7 @@ describe('chargement à la demande du graphe OSM d’un secteur', () => {
     expect(err.kind).toBe('overloaded');
     expect(err.message).toMatch(/10 tentatives/);
     expect(urls.length).toBe(10);
-    expect(new Set(urls).size).toBe(2);
+    expect(new Set(urls).size).toBe(1);
   });
 
   it('un service qui finit par répondre après plusieurs échecs (429, 504, réseau) : le chargement réussit', async () => {
@@ -88,6 +88,22 @@ describe('chargement à la demande du graphe OSM d’un secteur', () => {
     expect(r.graph.edgeCount).toBeGreaterThan(100);
   });
 
+  it('par défaut : relance immédiate (1 s), sans page d’état ; changement de service seulement si le service est injoignable', async () => {
+    const urls: string[] = [];
+    let n = 0;
+    const f = (async (u: RequestInfo | URL) => {
+      urls.push(String(u));
+      n++;
+      if (n === 1) return new Response('', { status: 504 });
+      if (n === 2) throw new TypeError('Failed to fetch');
+      return new Response(JSON.stringify(overpassGrid(metz)), { status: 200 });
+    }) as typeof fetch;
+    await loadZoneGraph(metz, half, 'Metz', { fetchFn: f, cache: null, retryDelayMs: 1 });
+    expect(urls.length).toBe(3); // aucun appel à la page d'état
+    expect(urls[1]).toBe(urls[0]); // 504 : même service
+    expect(urls[2]).not.toBe(urls[1]); // injoignable : l'autre service
+  });
+
   it('page d’état d’Overpass : créneaux libres, attente annoncée, absence de limite', () => {
     expect(parseOverpassStatus('Connected as: 1.2.3.4\nRate limit: 2\n2 slots available now.\n')).toEqual({ freeNow: true, waitS: 0 });
     expect(parseOverpassStatus('Rate limit: 2\nSlot available after: 2025-01-01T10:00:09Z, in 9 seconds.\n')).toEqual({ freeNow: false, waitS: 9 });
@@ -95,7 +111,7 @@ describe('chargement à la demande du graphe OSM d’un secteur', () => {
     expect(parseOverpassStatus('')).toEqual({ freeNow: false, waitS: 0 });
   });
 
-  it('les tentatives ne s’empilent pas : on attend le créneau annoncé par le service (état et Retry-After) avant de relancer', async () => {
+  it('option : on peut attendre le créneau annoncé par la page d’état du service (désactivé par défaut)', async () => {
     const t: Array<{ at: number; url: string }> = [];
     const t0 = Date.now();
     let n = 0;
@@ -108,7 +124,7 @@ describe('chargement à la demande du graphe OSM d’un secteur', () => {
       return new Response(JSON.stringify(overpassGrid(metz)), { status: 200 });
     }) as typeof fetch;
     const progress: string[] = [];
-    const r = await loadZoneGraph(metz, half, 'Metz', { fetchFn: f, cache: null, retryDelayMs: 10, onProgress: (x) => progress.push(x) });
+    const r = await loadZoneGraph(metz, half, 'Metz', { fetchFn: f, cache: null, retryDelayMs: 10, useStatus: true, onProgress: (x) => progress.push(x) });
     expect(r.graph.edgeCount).toBeGreaterThan(100);
     const statusCalls = t.filter((x) => x.url.endsWith('/status'));
     expect(statusCalls.length).toBe(1);

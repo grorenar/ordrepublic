@@ -83,6 +83,8 @@ export interface GroupSpec {
   /** Surcharge de vitesse (m/s) pour ce groupe. */
   speedMps?: number;
   parentId?: Id;
+  /** Rassemblement statique : sens (vecteur unitaire) dans lequel il s'étire de préférence, typiquement le sens de départ du cortège. */
+  fillBias?: Vec2;
 }
 
 /** Individus simulés : tableaux typés, un enregistrement par personne (aucun plafond structurel). */
@@ -121,6 +123,8 @@ export interface StaticLayout {
   overflow: number;
   /** État du remplissage géodésique (reprise au prochain agrandissement du groupe). */
   geo?: GeoFill;
+  /** Réglages du remplissage : coût relatif d'un espace ouvert, pénalité des cellules à l'opposé du sens de départ. */
+  fill?: { openCost: number; behindPenalty: number; dir?: Vec2 };
 }
 
 /** Remplissage d'un rassemblement par distance de MARCHE depuis l'ancre (contourne les bâtiments, reste sur les surfaces praticables). */

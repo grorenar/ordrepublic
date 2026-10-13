@@ -19,13 +19,13 @@ export const LIVE_MARGIN_M = 80;
  * abandonne, et lui en envoyer aussitôt une autre occupe un second créneau (limite par adresse) : les tentatives qui
  * s'accumulent se bloquent alors entre elles.
  */
-export const LIVE_TIMEOUT_MS = 45_000;
+export const LIVE_TIMEOUT_MS = 60_000;
 export const MIN_EDGES = 10;
 /** Les services Overpass publics sont souvent saturés : on réessaie jusqu'à 10 fois (attente croissante) avant de déclarer l'échec. */
 export const LIVE_MAX_ATTEMPTS = 10;
-export const LIVE_RETRY_DELAY_MS = 4000;
-/** Attente maximale dictée par le service (créneau libre annoncé, `Retry-After`). */
-export const LIVE_MAX_SERVER_WAIT_MS = 60_000;
+export const LIVE_RETRY_DELAY_MS = 1000;
+/** Attente maximale dictée par le service (`Retry-After`). */
+export const LIVE_MAX_SERVER_WAIT_MS = 5_000;
 
 /** Lit la page d'état d'Overpass (`/api/status`) : créneaux libres maintenant, ou secondes avant le prochain créneau. */
 export function parseOverpassStatus(text: string): { freeNow: boolean; waitS: number } {
@@ -58,7 +58,7 @@ export interface LiveOptions {
   timeoutMs?: number;
   /** Choix du joueur, relu à chaque tentative : inclure les lieux d'intérêt (défaut oui). Jamais imposé par le chargeur. */
   includePois?: () => boolean;
-  /** Consulter la page d'état du service avant de réessayer (attend un créneau libre au lieu d'empiler les requêtes). Défaut oui. */
+  /** Consulter la page d'état du service avant de réessayer (attend un créneau libre). Défaut NON : l'attente ralentissait les relances qui, en pratique, réussissent mieux enchaînées sur le service principal. */
   useStatus?: boolean;
   /** Nombre maximal de tentatives (toutes erreurs de service confondues), défaut 10. */
   maxAttempts?: number;
@@ -102,18 +102,20 @@ export async function loadZoneGraph(center: LngLat, half: { halfWidth: number; h
   } catch (e) {
     throw new LiveLoadError(e instanceof Error ? e.message : 'Zone trop grande.', 'too_large');
   }
-  const fullQuery = overpassQuery(bbox, { timeoutS: 40 });
-  const lightQuery = overpassQuery(bbox, { timeoutS: 40, pois: false });
+  const fullQuery = overpassQuery(bbox, { timeoutS: 50 });
+  const lightQuery = overpassQuery(bbox, { timeoutS: 50, pois: false });
   const fetchFn = o.fetchFn ?? fetch.bind(globalThis);
   let json: unknown = null;
   let used = '';
   let lastErr: LiveLoadError | null = null;
   let retryAfterMs = 0;
+  /** Le service principal est retenté tel quel (les relances y réussissent le mieux) ; on ne change de service que s'il est injoignable. */
+  let epIdx = 0;
   const endpoints = o.endpoints ?? OVERPASS_ENDPOINTS;
   const maxAttempts = Math.max(1, o.maxAttempts ?? LIVE_MAX_ATTEMPTS);
   const baseDelay = o.retryDelayMs ?? LIVE_RETRY_DELAY_MS;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const endpoint = endpoints[(attempt - 1) % endpoints.length] as string;
+    const endpoint = endpoints[epIdx % endpoints.length] as string;
     const light = o.includePois ? !o.includePois() : false;
     const query = light ? lightQuery : fullQuery;
     progress(`Téléchargement des rues et bâtiments OpenStreetMap (${new URL(endpoint).host})${maxAttempts > 1 ? ` — tentative ${attempt}/${maxAttempts}` : ''}${light ? ', requête allégée sans lieux' : ''}…`, 1);
@@ -142,16 +144,19 @@ export async function loadZoneGraph(center: LngLat, half: { halfWidth: number; h
     } catch (e) {
       if (o.signal?.aborted) throw cancelled();
       if (e instanceof DOMException && e.name === 'AbortError') lastErr = new LiveLoadError('Délai dépassé : le service Overpass ne répond pas.', 'timeout');
-      else lastErr = new LiveLoadError('Service Overpass injoignable (réseau, bloqueur de contenu ou service indisponible).', 'network');
+      else {
+        lastErr = new LiveLoadError('Service Overpass injoignable (réseau, bloqueur de contenu ou service indisponible).', 'network');
+        epIdx++; // injoignable : on essaie l'autre service
+      }
     } finally {
       clearTimeout(timer);
       o.signal?.removeEventListener('abort', onAbort);
     }
     if (attempt < maxAttempts) {
       // attente croissante (politesse envers un service public) ; si le service annonce un créneau libre plus tard, on l'attend
-      let wait = Math.max(baseDelay * Math.min(8, attempt), retryAfterMs);
+      let wait = Math.max(baseDelay, retryAfterMs);
       retryAfterMs = 0;
-      if (o.useStatus !== false) {
+      if (o.useStatus === true) {
         try {
           const sctl = new AbortController();
           const st = setTimeout(() => sctl.abort(), 4000);

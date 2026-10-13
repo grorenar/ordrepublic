@@ -86,3 +86,45 @@ describe('rassemblement à côté d’une place', () => {
     expect(await share(30)).toBeLessThan(0.02); // place trop éloignée : non reliée
   }, 90_000);
 });
+
+describe('forme du rassemblement : places d’abord, étiré dans le sens du départ', () => {
+  const build = async () => {
+    const { gridGraph } = await import('./navHelpers');
+    const { Sim } = await import('../../src/engine/sim');
+    const { anchorAt, PLAN } = await import('./engineHelpers');
+    return { gridGraph, Sim, anchorAt, PLAN };
+  };
+
+  it('la foule occupe la place voisine avant de déborder dans la rue (préférence réglable)', async () => {
+    const { gridGraph, Sim, anchorAt, PLAN } = await build();
+    const place = { id: 'p', kind: 'square' as const, ring: new Float32Array([-50, 3, 50, 3, 50, 40, -50, 40]), source: 'osm' as const };
+    const g = gridGraph({ cols: 7, rows: 1, spacing: 100, width: 8, spaces: [place] });
+    const share = (openCost: number) => {
+      const sim = new Sim({ graph: g, seed: 1, params: { fill: { openCost } } });
+      const grp = sim.group(sim.createGroup({ label: 'R', kind: 'static', size: 2500, origin: { x: 0, y: 0 }, anchor: anchorAt({ x: 0, y: 0 }, 'rue', 15) }, PLAN))!;
+      sim.run(300);
+      const m = grp.members;
+      let on = 0;
+      for (let i = m.activeStart; i < m.n; i++) if ((m.y[i] as number) > 4 && Math.abs(m.x[i] as number) < 50 && (m.y[i] as number) < 40) on++;
+      return on / (m.n - m.activeStart);
+    };
+    expect(share(0.45)).toBeGreaterThan(share(1) + 0.05);
+    expect(share(0.45)).toBeGreaterThan(0.45);
+  }, 120_000);
+
+  it('avec un sens de départ, le rassemblement s’étire devant lui plutôt que derrière (moins de convergence depuis l’arrière)', async () => {
+    const { gridGraph, Sim, anchorAt, PLAN } = await build();
+    const g = gridGraph({ cols: 9, rows: 1, spacing: 100, width: 8 });
+    const ahead = (bias: { x: number; y: number } | undefined) => {
+      const sim = new Sim({ graph: g, seed: 1 });
+      const grp = sim.group(sim.createGroup({ label: 'R', kind: 'static', size: 3000, origin: { x: 0, y: 0 }, anchor: anchorAt({ x: 0, y: 0 }, 'rue', 15), fillBias: bias }, PLAN))!;
+      sim.run(100);
+      const m = grp.members;
+      let a = 0;
+      for (let i = m.activeStart; i < m.n; i++) if ((m.x[i] as number) > 0) a++;
+      return a / (m.n - m.activeStart);
+    };
+    expect(Math.abs(ahead(undefined) - 0.5)).toBeLessThan(0.1);
+    expect(ahead({ x: 1, y: 0 })).toBeGreaterThan(0.62);
+  }, 120_000);
+});

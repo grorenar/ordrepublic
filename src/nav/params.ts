@@ -57,7 +57,7 @@ export const DEFAULT_NAV_PARAMS: NavParams = {
     [EdgeClass.LivingStreet]: 3,
     [EdgeClass.Service]: 3,
     // voie de bus en site propre : large (gabarit d'un bus), vitesse d'une artère ; réservée aux véhicules avec avertisseurs
-    [EdgeClass.Busway]: 6.5,
+    [EdgeClass.Busway]: 9,
   },
   emergencySpeedFactor: 1.8,
   vehicleFootwayMinWidthM: 4,

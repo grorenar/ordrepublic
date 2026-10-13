@@ -74,6 +74,21 @@ export function parsePlan(json: unknown): OperationPlan {
   };
 }
 
+/** Sens de départ d'un cortège : direction (vecteur unitaire) des ~30 premiers mètres de l'itinéraire de `from` vers `to`, ou `undefined`. */
+export function departureDirection(nav: NavContext, from: Vec2, to: Vec2): Vec2 | undefined {
+  const r = nav.findRoute(from, to, 'crowd');
+  if (!r || r.pts.length < 4) return undefined;
+  const x0 = r.pts[0] as number;
+  const y0 = r.pts[1] as number;
+  for (let k = 2; k < r.pts.length; k += 2) {
+    const dx = (r.pts[k] as number) - x0;
+    const dy = (r.pts[k + 1] as number) - y0;
+    const d = Math.hypot(dx, dy);
+    if (d >= 30 || k >= r.pts.length - 2) return d > 1 ? { x: dx / d, y: dy / d } : undefined;
+  }
+  return undefined;
+}
+
 const placeAnchor = (id: string, label: string, pos: Vec2): Anchor => ({ id, kind: 'place', pos, radius: 20, label, source: 'synthetic' });
 
 export interface CompiledPlan extends DemoScenario {
@@ -126,7 +141,7 @@ export function compilePlan(graph: StreetGraph, plan: OperationPlan): CompiledPl
   const dayStart = plan.departClockSec - PLAN_LEAD_S;
 
   const timeline: ScenarioEvent[] = [
-    { id: 'ev-0-rassemblement', atMs: 0, kind: 'spawn_group', reason: `rassemblement au point de départ : ${size} personnes (effectif déclaré ${plan.declaredSize}, ± ${plan.uncertaintyPct} %)`, spec: { key: 'rassemblement', label: `Manifestation — ${plan.name}`, kind: 'static', size, origin: plan.start, anchor: startA, tension: 15 } },
+    { id: 'ev-0-rassemblement', atMs: 0, kind: 'spawn_group', reason: `rassemblement au point de départ : ${size} personnes (effectif déclaré ${plan.declaredSize}, ± ${plan.uncertaintyPct} %)`, spec: { key: 'rassemblement', label: `Manifestation — ${plan.name}`, kind: 'static', size, origin: plan.start, anchor: startA, tension: 15, fillBias: departureDirection(live, plan.start, (plan.waypoints[0] ?? plan.end) as Vec2) } },
   ];
   closedEdges.forEach((e, i) => timeline.push({ id: `ev-0-ferme-${i + 1}`, atMs: 0, kind: 'close_street', edgeId: e, reason: 'axe fermé par le dispositif prévu au plan' }));
   timeline.push({ id: 'ev-depart', atMs: ms(departS), kind: 'begin_march', groupKey: 'rassemblement', destination: endA, waypoints: wps, onArrival: 'settle', label: `Cortège — ${plan.name}`, reason: `heure de départ du plan atteinte : le cortège part du point de départ vers l’arrivée${wps.length ? ` en passant par ${wps.length} point(s) imposé(s)` : ''}` });

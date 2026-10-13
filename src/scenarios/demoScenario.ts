@@ -1,3 +1,4 @@
+import { departureDirection } from './plan';
 import type { Vec2 } from '../geo/mercator';
 import { NavContext } from '../nav/astar';
 import type { StreetGraph } from '../nav/graph';
@@ -167,7 +168,7 @@ export function buildDemoScenario(graph: StreetGraph, opts: { cortegeSize?: numb
   const ms = (x: number) => Math.round(x * 1000);
   const timeline: ScenarioEvent[] = [
     { id: 'ev-0-piquet', atMs: 0, kind: 'spawn_group', reason: adminReal ? `piquet de rassemblement devant ${admin.label} prévu au scénario` : 'piquet de rassemblement prévu au scénario (aucune administration repérée dans le secteur : lieu fictif)', spec: { key: 'piquet', label: adminReal ? `Piquet devant ${admin.label}` : 'Piquet de rassemblement', kind: 'static', size: opts.piquetSize ?? 120, origin: admin.pos, anchor: admin, tension: 15 } },
-    { id: 'ev-0-rassemblement', atMs: 0, kind: 'spawn_group', reason: `point de rassemblement prévu au scénario : ${plaza.label}, départ du cortège à l’heure indiquée`, spec: { key: 'rassemblement', label: `Rassemblement — ${plaza.label}`, kind: 'static', size: early, origin: plazaPt, anchor: plaza, tension: 10 } },
+    { id: 'ev-0-rassemblement', atMs: 0, kind: 'spawn_group', reason: `point de rassemblement prévu au scénario : ${plaza.label}, départ du cortège à l’heure indiquée`, spec: { key: 'rassemblement', label: `Rassemblement — ${plaza.label}`, kind: 'static', size: early, origin: plazaPt, anchor: plaza, tension: 10, fillBias: departureDirection(new NavContext(graph, DEFAULT_NAV_PARAMS), plazaPt, admin.pos) } },
   ];
   for (const a of arrivals) {
     timeline.push({

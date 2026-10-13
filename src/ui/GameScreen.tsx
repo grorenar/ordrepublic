@@ -692,7 +692,7 @@ export function GameScreen({ city: initialCity, settings, debug, onSettings, onE
               <p class="muted small" data-testid="live-progress">
                 {liveStatus.text} · {loadSecs} s
               </p>
-              {loadSecs >= 12 && liveStatus.step === 1 && <p class="small">Le service OpenStreetMap peut être lent selon la charge : une connexion qui traîne est abandonnée après 20 s puis retentée automatiquement (jusqu’à 10 fois).</p>}
+              {loadSecs >= 12 && liveStatus.step === 1 && <p class="small">Le service OpenStreetMap peut être lent selon la charge : une connexion qui traîne est abandonnée après 60 s ; les tentatives s’enchaînent automatiquement (jusqu’à 10 fois).</p>}
               <label class="check small">
                 <input type="checkbox" data-testid="load-pois" checked={withPois} onChange={(e) => setWithPois((e.target as HTMLInputElement).checked)} />
                 Charger aussi les lieux d’intérêt (commerces, écoles…) — décochez pour une requête plus légère

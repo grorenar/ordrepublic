@@ -44,6 +44,8 @@ Contrôles de cohérence appliqués à la création d’un `Sim` (`validateSimPa
 | `streetMarginM` | m | 0.8 | Marge entre un cortège et le bord de la rue. | Réduit la largeur utile du front (2 marges retirées de la largeur de rue). |
 | `columnLengthRateMps` | m/s | 4 | Vitesse maximale de variation de la longueur de colonne. | Lisse l’allongement/raccourcissement quand la largeur de rue change : aucun saut de position. |
 | `staticMaxRadiusM` | m | 2500 | Rayon maximal exploré pour placer un rassemblement statique. | Au-delà, la densité effective augmente (journalisé) ; borne le coût de mise en place. |
+| `fill.openCost` | multiple (0–1) | 0.45 | Coût relatif d’un déplacement en espace ouvert (place, parc) dans le remplissage d’un rassemblement. | Plus bas : la foule occupe d’abord la place voisine plutôt que les rues ; 1 = aucune préférence. |
+| `fill.behindPenalty` | multiple | 0.9 | Surcoût des cellules situées à l’opposé du sens de départ du cortège dans le remplissage d’un rassemblement. | Plus haut : le rassemblement s’étire dans le sens de la marche (moins de convergence depuis l’arrière au départ) ; 0 = remplissage isotrope. |
 
 ## Individus (N2)
 
@@ -134,7 +136,7 @@ Contrôles de cohérence appliqués à la création d’un `Sim` (`validateSimPa
 | `lookAheadM` | m | 15 | Distance d’anticipation devant la tête d’un cortège pour la vitesse due aux autres foules. | Un cortège ralentit avant d’entrer dans une rue encombrée. |
 | `walkMaskResolutionM` | m/cellule | 1 | Résolution du masque de marche (bâtiments rasterisés). | Précision du rejet des bâtiments ; mémoire ∝ 1/résolution². |
 | `nav.speedFootMps` | m/s | 1.4 | Vitesse piétonne nominale pour le calcul du coût d’itinéraire. | Coût en secondes ; n’influence pas la vitesse réelle des groupes. |
-| `nav.speedVehicleByClass.*` | m/s | 0: 8 · 1: 7 · 2: 6.5 · 3: 5.5 · 4: 5 · 5: 3 · 6: 3 · 12: 6.5 | Vitesse nominale des véhicules par classe de voie (0 = interdit). La voie de bus en site propre (6,5 m/s) n’est ouverte qu’aux véhicules avec avertisseurs. | Préférence d’itinéraire des véhicules (grandes voies favorisées) ; avec avertisseurs : multipliée par nav.emergencySpeedFactor, dans la limite du plafond d’urgence. |
+| `nav.speedVehicleByClass.*` | m/s | 0: 8 · 1: 7 · 2: 6.5 · 3: 5.5 · 4: 5 · 5: 3 · 6: 3 · 12: 9 | Vitesse nominale des véhicules par classe de voie (0 = interdit). La voie de bus en site propre (9 m/s) n’est ouverte qu’aux véhicules avec avertisseurs. | Préférence d’itinéraire des véhicules (grandes voies favorisées) ; avec avertisseurs : multipliée par nav.emergencySpeedFactor, dans la limite du plafond d’urgence. |
 | `nav.crowdPreferredWidthM` | m | 8 | Largeur praticable en dessous de laquelle une rue est pénalisée pour un cortège. | Les cortèges préfèrent les rues larges ; une ruelle reste possible si c’est nécessaire. |
 | `nav.crowdNarrowPenalty` | multiple | 1.2 | Surcoût maximal (proportionnel au manque de largeur) pour un cortège dans une rue très étroite. | 0 : aucune préférence de largeur. |
 | `nav.emergencySpeedFactor` | multiple | 1.8 | Multiple de la vitesse de la classe de voie atteint par un véhicule avec avertisseurs. | Itinéraires et vitesses des véhicules d’urgence ; les sens interdits sont aussi permis. |

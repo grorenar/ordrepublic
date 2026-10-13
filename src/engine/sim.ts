@@ -399,7 +399,7 @@ export class Sim {
     if (spec.kind === 'static') {
       const anchor: Anchor = spec.anchor ?? { id: `A-${id}`, kind: 'place', pos: spec.origin, radius: 20, label: spec.label, source: 'synthetic' };
       g.anchor = anchor;
-      g.layout = createLayout(snapToWalkable(anchor.pos, this.mask), p.staticDensity, seed);
+      g.layout = createLayout(snapToWalkable(anchor.pos, this.mask), p.staticDensity, seed, { openCost: p.fill.openCost, behindPenalty: p.fill.behindPenalty, dir: spec.fillBias });
       extendLayout(g.layout, n, this.mask, p.staticMaxRadiusM, seed);
       this.log('info', 'group.created', `${spec.label} : rassemblement statique de ${n} personnes (${anchor.label}).`, cause, { type: 'group', id }, { size: n, overflow: g.layout.overflow });
       if (g.layout.overflow > 0) this.log('warn', 'group.layout_overflow', `${spec.label} : zone praticable insuffisante autour de ${anchor.label}, densité accrue pour ${g.layout.overflow} personnes.`, cause, { type: 'group', id });
@@ -505,7 +505,7 @@ export class Sim {
       // aucun itinéraire : le groupe reste sur place, positionné autour de son origine
       g.phase = 'waiting';
       g.waitingSinceMs = this.timeMs;
-      g.layout = createLayout(snapToWalkable(origin, this.mask), p.staticDensity, g.seed);
+      g.layout = createLayout(snapToWalkable(origin, this.mask), p.staticDensity, g.seed, { openCost: p.fill.openCost, behindPenalty: 0 });
       extendLayout(g.layout, n, this.mask, p.staticMaxRadiusM, g.seed);
       this.log('warn', 'group.created', `${g.label} : ${n} personnes, aucun itinéraire vers ${g.plan.destination?.label ?? 'la destination'} — le groupe reste sur place.`, cause, { type: 'group', id: g.id }, { size: n });
       return;
@@ -518,7 +518,7 @@ export class Sim {
     const dest = g.plan.destination;
     if (dest && g.plan.onArrival !== 'leave') {
       locate(g.route, g.route.length, loc);
-      g.layout = createLayout({ x: loc.x, y: loc.y }, p.staticDensity, g.seed);
+      g.layout = createLayout({ x: loc.x, y: loc.y }, p.staticDensity, g.seed, { openCost: this.params.fill.openCost, behindPenalty: 0 });
       extendLayout(g.layout, n, this.mask, p.staticMaxRadiusM, g.seed);
       for (let i = 0; i < n; i++) g.members.slotOf[i] = n - 1 - i; // le premier arrivé prend le créneau le plus proche
     }
@@ -623,7 +623,7 @@ export class Sim {
     const n = g.members.n;
     if (plan.destination && plan.onArrival !== 'leave') {
       locate(g.route, g.route.length, loc);
-      g.layout = createLayout({ x: loc.x, y: loc.y }, this.params.staticDensity, g.seed);
+      g.layout = createLayout({ x: loc.x, y: loc.y }, this.params.staticDensity, g.seed, { openCost: this.params.fill.openCost, behindPenalty: 0 });
       extendLayout(g.layout, n, this.mask, this.params.staticMaxRadiusM, g.seed);
       for (let i = 0; i < n; i++) g.members.slotOf[i] = n - 1 - i;
     }
@@ -1025,7 +1025,7 @@ export class Sim {
     const dest = g.plan.destination;
     if (dest) {
       locate(route, route.length, loc);
-      g.layout = createLayout({ x: loc.x, y: loc.y }, this.params.staticDensity, g.seed);
+      g.layout = createLayout({ x: loc.x, y: loc.y }, this.params.staticDensity, g.seed, { openCost: this.params.fill.openCost, behindPenalty: 0 });
       extendLayout(g.layout, n, this.mask, this.params.staticMaxRadiusM, g.seed);
       for (let i = 0; i < n; i++) m.slotOf[i] = n - 1 - i;
     }

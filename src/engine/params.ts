@@ -111,6 +111,13 @@ export interface SimParams {
 
   // --- états de rue / navigation -------------------------------------------------
   /** Recalcul des états de rue tous les N ticks. */
+  /** Remplissage d'un rassemblement (distance de marche depuis l'ancre). */
+  fill: {
+    /** Coût relatif (< 1) d'un déplacement en espace ouvert : places et parcs sont occupés avant les rues voisines. */
+    openCost: number;
+    /** Surcoût (0 = aucun) des cellules à l'opposé du sens de départ : la foule s'étire dans le sens de la marche. */
+    behindPenalty: number;
+  };
   /** Monde : décor et lieux d'intérêt générés de façon déterministe le long des rues (phase 4). */
   world: {
     binSpacingM: number;
@@ -230,6 +237,7 @@ export const DEFAULT_SIM_PARAMS: SimParams = {
   noiseAmplitudeM: 0.25,
   blendMaxSpeedMps: 3,
   lod: { defaultLevel: 2, n2RadiusM: 400, n1RadiusM: 2500, blockSize: 256, blockMinGroupSize: 4000, hysteresis: 0.1 },
+  fill: { openCost: 0.45, behindPenalty: 0.9 },
   world: { binSpacingM: 70, benchSpacingM: 180, shelterSpacingM: 260, containerSpacingM: 200, shopSpacingM: 100, shopSpacingCommercialM: 35, commercialShopCount: 3, commercialRadiusM: 80, maxDecor: 8000, minOffsetM: 1.2 },
   incidents: {
     everyTicks: 10,

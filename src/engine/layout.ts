@@ -21,8 +21,8 @@ export function snapToWalkable(anchor: Vec2, mask: WalkMask | null): Vec2 {
   return { ...anchor };
 }
 
-export function createLayout(anchor: Vec2, density: number, seed: number): StaticLayout {
-  return { anchor: { ...anchor }, k: 0, rot: unit(seed, 7) * Math.PI * 2, density, pts: new Float32Array(0), count: 0, rMax: 0, overflow: 0 };
+export function createLayout(anchor: Vec2, density: number, seed: number, fill?: StaticLayout['fill']): StaticLayout {
+  return { anchor: { ...anchor }, k: 0, rot: unit(seed, 7) * Math.PI * 2, density, pts: new Float32Array(0), count: 0, rMax: 0, overflow: 0, ...(fill ? { fill } : {}) };
 }
 
 /** Vrai si le segment [a,b] ne traverse aucun bâtiment (échantillonnage tous les `step` mètres). */
@@ -108,7 +108,7 @@ function extendGeodesic(layout: StaticLayout, count: number, mask: WalkMask, max
   const pts = new Float32Array(cap * 2);
   pts.set(layout.pts.subarray(0, layout.count * 2));
   let n = layout.count;
-  const { anchor, density } = layout;
+  const { anchor, density, fill } = layout;
   const cols = mask.cols;
   const cellOf = (x: number, y: number) => Math.floor((y - mask.minY) / res) * cols + Math.floor((x - mask.minX) / res);
   if (!layout.geo) {
@@ -153,7 +153,19 @@ function extendGeodesic(layout: StaticLayout, count: number, mask: WalkMask, max
       // les diagonales ne coupent pas un coin de bâtiment
       if (dc !== 0 && dr !== 0 && (!mask.isWalkable(cx + dc * res, cy) || !mask.isWalkable(cx, cy + dr * res))) continue;
       geo.seen.add(nid);
-      geo.heap.push(d + w * res, nid);
+      // un espace ouvert (place, parc) « coûte » moins cher : le rassemblement l'occupe avant de déborder dans les rues voisines ;
+      // les cellules à l'opposé du sens de départ coûtent plus cher : la foule s'étire dans le sens de la marche
+      let k = 1;
+      const nx = mask.minX + (nc + 0.5) * res;
+      const ny = mask.minY + (nr + 0.5) * res;
+      if (fill && mask.isOpen(nx, ny)) k = fill.openCost;
+      if (fill?.dir && fill.behindPenalty > 0) {
+        const vx = nx - anchor.x;
+        const vy = ny - anchor.y;
+        const vl = Math.hypot(vx, vy);
+        if (vl > 1) k *= 1 + fill.behindPenalty * Math.max(0, -(vx * fill.dir.x + vy * fill.dir.y) / vl);
+      }
+      geo.heap.push(d + w * res * k, nid);
     }
   }
   // espace praticable épuisé (ancre enfermée, rayon maximal) : débordement — créneaux réutilisés avec un léger décalage (densité accrue)
