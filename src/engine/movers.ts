@@ -190,11 +190,11 @@ export class MoverSystem {
     let floorSpeed = 0;
     if (vehicle) {
       const s = st.vehState[edge] as number;
-      factor = s === 0 ? 1 : s === 1 ? 0.7 : 0.35;
+      factor = s === 0 ? 1 : s === 1 ? 0.7 : s === 2 ? 0.35 : emergency ? this.d.params.nav.emergencyBlockedSpeedFactor : 0.35;
       // plancher : avertisseurs allumés, on n'est jamais plus lent que sans avertisseurs sur la même rue
       floorSpeed = emergency ? Math.min(p.vehicleSpeedMps, this.d.nav.vehicleSpeedOn(edge) || 4) * factor : 0;
       // avertisseurs actifs : on ralentit à l'approche d'une foule, sinon on roule à pleine vitesse
-      if (emergency) {
+      if (emergency && s !== 3) {
         for (let k = ei; k < r.edges.length; k++) {
           const d = Math.max(0, (r.edgeStart[k] as number) - e.routeS);
           if (d >= p.emergencyCrowdSlowM) break;

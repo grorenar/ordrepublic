@@ -110,8 +110,9 @@ export class NavContext {
       if (st.scenarioBlock[e]) return Infinity;
       if (mode === 'vehicle' || mode === 'emergency') {
         const s = st.vehState[e] as number;
-        if (s === 3) return Infinity;
-        speed *= s === 0 ? 1 : s === 1 ? 0.7 : 0.35;
+        // rue saturée par une foule : infranchissable, sauf pour un véhicule avec avertisseurs qui s'y fraie un passage au pas
+        if (s === 3 && mode !== 'emergency') return Infinity;
+        speed *= s === 0 ? 1 : s === 1 ? 0.7 : s === 2 ? 0.35 : this.params.emergencyBlockedSpeedFactor;
       } else {
         if (st.footState[e] === 3) {
           if (!soft || !this.inZone(e, soft)) return Infinity;

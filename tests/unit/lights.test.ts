@@ -113,3 +113,41 @@ describe('avertisseurs et foule : jamais plus lent que sans avertisseurs', () =>
     expect(on).toBeGreaterThanOrEqual(off - 0.05);
   });
 });
+
+describe('rue saturée par une foule', () => {
+  const setup = (on: boolean) => {
+    const graph = gridGraph({ cols: 6, rows: 1, spacing: 100, width: 10 });
+    const sim = new Sim({ graph, seed: 1 });
+    sim.createGroup({ label: 'Foule dense', kind: 'static', size: 9000, origin: { x: 0, y: 0 }, anchor: anchorAt({ x: 0, y: 0 }, 'foule', 15) }, PLAN);
+    sim.run(100);
+    let saturated = false;
+    for (let e = 0; e < graph.edgeCount; e++) if (sim.state.vehState[e] === 3) saturated = true;
+    const id = sim.addVehicle({ vehicle: 'fourgon_police', callsign: 'F-1', crew: 3, pos: { x: -250, y: 0 } }, PLAN);
+    const v = sim.entity(id)!;
+    if (on) sim.issueOrder({ kind: 'lights', ids: [id], on: true });
+    sim.issueOrder({ kind: 'move', ids: [id], target: { x: 250, y: 0 } });
+    return { sim, v, saturated };
+  };
+
+  it('sans avertisseurs : la rue saturée est infranchissable (le véhicule attend)', () => {
+    const { sim, v, saturated } = setup(false);
+    expect(saturated).toBe(true);
+    sim.run(3000);
+    expect(v.x).toBeLessThan(0); // n'a pas traversé la foule
+  });
+
+  it('avec avertisseurs : il traverse la foule, très doucement', () => {
+    const { sim, v, saturated } = setup(true);
+    expect(saturated).toBe(true);
+    let maxInCrowd = 0;
+    let reached = false;
+    for (let t = 0; t < 12000 && !reached; t++) {
+      sim.step();
+      if (Math.abs(v.x) < 30 && sim.state.vehState[0] !== undefined) maxInCrowd = Math.max(maxInCrowd, v.speedMps);
+      if (v.x > 230) reached = true;
+    }
+    expect(reached).toBe(true);
+    expect(maxInCrowd).toBeGreaterThan(0);
+    expect(maxInCrowd).toBeLessThan(2); // au pas au milieu des gens
+  }, 60_000);
+});
