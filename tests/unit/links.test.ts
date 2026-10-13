@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Vec2 } from '../../src/geo/mercator';
 import { buildGraph, EdgeClass, EdgeFlag, type Obstacle, type RawEdge } from '../../src/nav/graph';
 import { NavContext } from '../../src/nav/astar';
-import { addPedestrianLinks } from '../../src/nav/links';
+import { addOpenSpaceLinks, addPedestrianLinks } from '../../src/nav/links';
 import { DEFAULT_NAV_PARAMS } from '../../src/nav/params';
 
 const origin = { lng: 6.17, lat: 49.11 };
@@ -104,5 +104,43 @@ describe('coût sur un grand réseau', () => {
     addPedestrianLinks(g);
     expect(performance.now() - t0).toBeLessThan(2000);
     expect(g.edgeCount).toBeGreaterThan(2000);
+  });
+});
+
+describe('traversée d’une place ou d’une zone piétonne cartographiée en surface', () => {
+  const plaza = { id: 'sj', kind: 'pedestrian_area' as const, name: 'Place Saint-Jacques', ring: new Float32Array([-88, -15, 88, -15, 88, 15, -88, 15]), source: 'osm' as const };
+  const ringRoad = (o: { obstacles?: Obstacle[]; through?: boolean } = {}) => {
+    const nodes: Vec2[] = [{ x: -95, y: 0 }, { x: 95, y: 0 }, { x: -95, y: 200 }, { x: 95, y: 200 }];
+    const edges: RawEdge[] = [
+      edge(0, 2, [nodes[0] as Vec2, nodes[2] as Vec2], { name: 'Rue A' }),
+      edge(2, 3, [nodes[2] as Vec2, nodes[3] as Vec2], { name: 'Rue B' }),
+      edge(3, 1, [nodes[3] as Vec2, nodes[1] as Vec2], { name: 'Rue C' }),
+    ];
+    if (o.through) edges.push(edge(0, 1, [nodes[0] as Vec2, nodes[1] as Vec2], { name: 'Passage' }));
+    return buildGraph({ origin, nodes, edges, spaces: [plaza], obstacles: o.obstacles, provenance: { source: 'osm' } });
+  };
+
+  it('une place sans aucune arête à l’intérieur devient traversable : le cortège la coupe au lieu de la contourner', () => {
+    const g = ringRoad();
+    const before = new NavContext(g, DEFAULT_NAV_PARAMS).findRoute({ x: -95, y: 0 }, { x: 95, y: 0 }, 'crowd')!;
+    expect(before.length).toBeGreaterThan(550);
+    const r = addOpenSpaceLinks(g);
+    expect(r.added).toBeGreaterThanOrEqual(1);
+    const after = new NavContext(r.graph, DEFAULT_NAV_PARAMS).findRoute({ x: -95, y: 0 }, { x: 95, y: 0 }, 'crowd')!;
+    expect(after.length).toBeLessThan(200);
+    // classe piétonne : comme sur toute voie piétonne large, un véhicule peut la traverser, mais au pas (3 m/s)
+    const veh = new NavContext(r.graph, DEFAULT_NAV_PARAMS).findRoute({ x: -95, y: 0 }, { x: 95, y: 0 }, 'vehicle')!;
+    expect(veh.length).toBeLessThan(200);
+  });
+
+  it('pas de traversée si une voie la traverse déjà, ou si un bâtiment la barre', () => {
+    expect(addOpenSpaceLinks(ringRoad({ through: true })).added).toBe(0);
+    const wall: Obstacle = { ring: new Float32Array([-5, -14, 5, -14, 5, 14, -5, 14]), source: 'osm' };
+    expect(addOpenSpaceLinks(ringRoad({ obstacles: [wall] })).added).toBe(0);
+  });
+
+  it('un graphe sans espace ouvert est inchangé', () => {
+    const g = twin(60);
+    expect(addOpenSpaceLinks(g).graph).toBe(g);
   });
 });

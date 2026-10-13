@@ -8,7 +8,7 @@ import {
   type RawEdge,
   type StreetGraph,
 } from '../graph';
-import { addPedestrianLinks } from '../links';
+import { addOpenSpaceLinks, addPedestrianLinks } from '../links';
 import { parseOverpass, type OsmData } from './parseOverpass';
 import { classifyHighway, classifyPoi, classifySpace, isAdministration, isBuilding, type ExclusionReason } from './tagsPolicy';
 
@@ -208,9 +208,11 @@ export function buildGraphFromOsm(data: OsmData, opts: BuildOptions = {}): { gra
 
   let pedestrianLinks = 0;
   if (opts.links !== false && graph.edgeCount > 1) {
+    const sp = addOpenSpaceLinks(graph);
+    graph = sp.graph;
     const r = addPedestrianLinks(graph);
     graph = r.graph;
-    pedestrianLinks = r.added;
+    pedestrianLinks = r.added + sp.added;
   }
 
   let lengthM = 0;

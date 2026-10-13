@@ -139,6 +139,10 @@ export interface SimParams {
     maxDecor: number;
     /** Distance minimale (m) entre un objet de décor et l'axe de la rue. */
     minOffsetM: number;
+    /** Si OSM recense au moins ce nombre de bancs (ou de poubelles) dans le secteur, la cartographie est jugée complète : aucun banc (ou poubelle) synthétique n'est ajouté. */
+    osmFurnitureCoverageMin: number;
+    /** Sinon, un objet synthétique n'est posé qu'à plus de cette distance (m) d'un objet OSM du même type. */
+    osmFurnitureClearM: number;
   };
   /** Incidents : déclenchement par la foule, escalade, propagation, confinement, conséquences (phase 4). */
   incidents: {
@@ -246,7 +250,7 @@ export const DEFAULT_SIM_PARAMS: SimParams = {
   lod: { defaultLevel: 2, n2RadiusM: 400, n1RadiusM: 2500, blockSize: 256, blockMinGroupSize: 4000, hysteresis: 0.1 },
   departureUnroll: 1,
   fill: { openCost: 0.45, behindPenalty: 0.9 },
-  world: { binSpacingM: 70, benchSpacingM: 180, shelterSpacingM: 260, containerSpacingM: 200, shopSpacingM: 100, shopSpacingCommercialM: 35, commercialShopCount: 3, commercialRadiusM: 80, maxDecor: 8000, minOffsetM: 1.2 },
+  world: { binSpacingM: 70, benchSpacingM: 180, shelterSpacingM: 260, containerSpacingM: 200, shopSpacingM: 100, shopSpacingCommercialM: 35, commercialShopCount: 3, commercialRadiusM: 80, maxDecor: 8000, minOffsetM: 1.2, osmFurnitureCoverageMin: 15, osmFurnitureClearM: 30 },
   incidents: {
     realShopsTargetable: true,
     everyTicks: 10,

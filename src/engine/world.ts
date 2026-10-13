@@ -156,8 +156,10 @@ export function buildWorld(g: StreetGraph, state: EdgeState, mask: WalkMask | nu
 
   // --- lieux d'intérêt OSM (jamais ciblés) et mobilier OSM
   const commerce: Vec2[] = [];
+  const osmFurniture: Record<'bin' | 'bench', Vec2[]> = { bin: [], bench: [] };
   for (const p of g.pois) {
     if (p.kind === 'furniture') {
+      osmFurniture[p.category === 'bench' ? 'bench' : 'bin'].push({ x: p.x, y: p.y });
       w.addDecor({ kind: p.category === 'bench' ? 'bench' : 'bin', x: p.x, y: p.y, heading: 0, source: 'osm', cause: osmCause });
       continue;
     }
@@ -202,6 +204,25 @@ export function buildWorld(g: StreetGraph, state: EdgeState, mask: WalkMask | nu
     return n >= wp.commercialShopCount;
   };
 
+  // --- mobilier : OSM d'abord. Un secteur bien cartographié (assez de bancs / poubelles) n'en reçoit aucun de synthétique ;
+  // sinon les objets synthétiques ne complètent que les manques (à distance des objets OSM)
+  const complete = { bin: osmFurniture.bin.length >= wp.osmFurnitureCoverageMin, bench: osmFurniture.bench.length >= wp.osmFurnitureCoverageMin };
+  const FCELL = Math.max(10, wp.osmFurnitureClearM);
+  const fgrid = { bin: new Map<number, Vec2[]>(), bench: new Map<number, Vec2[]>() };
+  for (const k of ['bin', 'bench'] as const) for (const q of osmFurniture[k]) {
+    const key2 = key(Math.floor(q.x / FCELL), Math.floor(q.y / FCELL));
+    const arr = fgrid[k].get(key2);
+    if (arr) arr.push(q);
+    else fgrid[k].set(key2, [q]);
+  }
+  const furnitureAllowed = (k: 'bin' | 'bench', x: number, y: number): boolean => {
+    if (complete[k]) return false;
+    const cx = Math.floor(x / FCELL);
+    const cy = Math.floor(y / FCELL);
+    for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (const q of fgrid[k].get(key(cx + a, cy + b)) ?? []) if (Math.hypot(q.x - x, q.y - y) < wp.osmFurnitureClearM) return false;
+    return true;
+  };
+
   // --- décor synthétique le long des rues
   let shopNo = 0;
   const free = (x: number, y: number) => !mask || !mask.isBlocked(x, y);
@@ -227,6 +248,7 @@ export function buildWorld(g: StreetGraph, state: EdgeState, mask: WalkMask | nu
       const x = p.x - p.ty * off * side;
       const y = p.y + p.tx * off * side;
       if (sidePolicy !== 'facade' && !free(x, y)) continue;
+      if ((kind === 'bin' || kind === 'bench') && !furnitureAllowed(kind, x, y)) continue;
       if (sidePolicy === 'facade' && mask && !mask.isBlocked(x - p.ty * 1.4 * side, y + p.tx * 1.4 * side)) continue; // pas de façade : pas de vitrine
       const heading = Math.atan2(p.ty, p.tx);
       if (kind === 'shopfront') {
@@ -276,8 +298,9 @@ export function buildWorld(g: StreetGraph, state: EdgeState, mask: WalkMask | nu
     for (let k = 0, tries = 0; k < n && tries < n * 40; tries++) {
       const x = minX + unit(hash32(seed, si * 997 + tries), 11) * (maxX - minX);
       const y = minY + unit(hash32(seed, si * 997 + tries), 12) * (maxY - minY);
-      if (!inRing(sp.ring, x, y) || !free(x, y) || w.decor.length >= wp.maxDecor) continue;
-      w.addDecor({ kind: k % 3 === 2 ? 'bin' : 'bench', x, y, heading: unit(hash32(seed, si * 31 + tries), 13) * Math.PI * 2, source: 'synthetic', cause: gen });
+      const fk: 'bin' | 'bench' = k % 3 === 2 ? 'bin' : 'bench';
+      if (!inRing(sp.ring, x, y) || !free(x, y) || w.decor.length >= wp.maxDecor || !furnitureAllowed(fk, x, y)) continue;
+      w.addDecor({ kind: fk, x, y, heading: unit(hash32(seed, si * 31 + tries), 13) * Math.PI * 2, source: 'synthetic', cause: gen });
       k++;
     }
   }

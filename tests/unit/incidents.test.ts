@@ -55,6 +55,37 @@ describe('monde : décor et lieux d’intérêt générés de façon déterminis
   });
 });
 
+describe('mobilier : OSM d’abord, synthétique seulement pour combler', () => {
+  const withBenches = (n: number) => {
+    const base = cityGraph();
+    const pois = Array.from({ length: n }, (_, i) => ({ id: `osm-n${i}`, kind: 'furniture' as const, category: 'bench', x: -200 + (i % 20) * 20, y: -100 + Math.floor(i / 20) * 20, source: 'osm' as const }));
+    return { ...base, pois };
+  };
+  const benches = (sim: Sim, source: 'osm' | 'synthetic') => sim.world.decor.filter((d) => d.kind === 'bench' && d.source === source);
+
+  it('secteur bien cartographié (≥ 15 bancs OSM) : les bancs OSM sont repris tels quels, aucun banc synthétique n’est inventé', () => {
+    const sim = new Sim({ graph: withBenches(30), seed: 1 });
+    expect(benches(sim, 'osm').length).toBe(30);
+    expect(benches(sim, 'synthetic').length).toBe(0);
+    // les autres types d'objets restent générés
+    expect(sim.world.decor.some((d) => d.kind === 'bin' && d.source === 'synthetic')).toBe(true);
+  });
+
+  it('couverture partielle : les bancs synthétiques ne comblent que les manques, à distance des bancs OSM', () => {
+    const sim = new Sim({ graph: withBenches(4), seed: 1 });
+    const osm = benches(sim, 'osm');
+    const syn = benches(sim, 'synthetic');
+    expect(osm.length).toBe(4);
+    expect(syn.length).toBeGreaterThan(5);
+    for (const b of syn) for (const o of osm) expect(Math.hypot(b.x - o.x, b.y - o.y)).toBeGreaterThanOrEqual(sim.params.world.osmFurnitureClearM - 1e-6);
+  });
+
+  it('aucun mobilier OSM (aucune donnée) : le décor synthétique complète comme avant', () => {
+    const sim = makeSim({ seed: 1 });
+    expect(benches(sim, 'synthetic').length).toBeGreaterThan(10);
+  });
+});
+
 describe('déclenchement par la foule (règle explicite, jamais gratuit)', () => {
   it('une foule tendue au contact d’un objet provoque un incident dont la cause cite le groupe et la tension', () => {
     const sim = makeSim({ seed: 3 });

@@ -220,3 +220,124 @@ export function addPedestrianLinks(g: StreetGraph, opts: Partial<LinkOptions> = 
   const graph = buildGraph({ origin: g.origin, nodes, edges, spaces: g.spaces, obstacles: g.obstacles, pois: g.pois, provenance: g.provenance });
   return { graph, added: links.length };
 }
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Liaisons à travers les espaces ouverts (places, zones piétonnes, parcs)
+// ---------------------------------------------------------------------------------------------------------------------
+
+function inRing(ring: Float32Array, x: number, y: number): boolean {
+  let inside = false;
+  const n = ring.length / 2;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const xi = ring[2 * i] as number;
+    const yi = ring[2 * i + 1] as number;
+    const xj = ring[2 * j] as number;
+    const yj = ring[2 * j + 1] as number;
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/** Distance (m) d'un point au contour d'un polygone. */
+function distToRing(ring: Float32Array, x: number, y: number): number {
+  let best = Infinity;
+  const n = ring.length / 2;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    const ax = ring[2 * i] as number;
+    const ay = ring[2 * i + 1] as number;
+    const bx = ring[2 * j] as number;
+    const by = ring[2 * j + 1] as number;
+    const dx = bx - ax;
+    const dy = by - ay;
+    const l2 = dx * dx + dy * dy;
+    const t = l2 > 0 ? Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / l2)) : 0;
+    best = Math.min(best, Math.hypot(x - (ax + t * dx), y - (ay + t * dy)));
+  }
+  return best;
+}
+
+export interface SpaceLinkOptions {
+  /** Un nœud est rattaché à l'espace s'il est dedans ou à moins de cette distance de son contour (m). */
+  attachM: number;
+  /** Portée maximale d'une traversée (m). */
+  maxSpanM: number;
+  /** Distance minimale entre les deux nœuds reliés (m). */
+  minSpanM: number;
+  /** Nombre maximal de traversées par nœud. */
+  perNode: number;
+  /** La traversée n'est ajoutée que si le trajet existant est plus long que ce multiple de la traversée (+ marge). */
+  detourFactor: number;
+  detourExtraM: number;
+  maxLinks: number;
+}
+
+export const DEFAULT_SPACE_LINK_OPTIONS: SpaceLinkOptions = { attachM: 12, maxSpanM: 350, minSpanM: 12, perNode: 5, detourFactor: 1.4, detourExtraM: 25, maxLinks: 3000 };
+
+/**
+ * Une place ou une zone piétonne cartographiée en surface (`place=square`, `highway=pedestrian` + `area=yes`, parc) n'a le plus souvent
+ * AUCUNE arête à l'intérieur : le graphe ne sait donc pas qu'on peut la traverser, et un cortège la contourne ou refuse d'y passer.
+ * On relie par des arêtes piétonnes droites les nœuds du réseau situés dans l'espace ou en bordure, quand le segment reste dans
+ * l'espace (hors bâtiment) et que le trajet existant est nettement plus long.
+ */
+export function addOpenSpaceLinks(g: StreetGraph, opts: Partial<SpaceLinkOptions> = {}): LinkResult {
+  const o = { ...DEFAULT_SPACE_LINK_OPTIONS, ...opts };
+  if (!g.spaces.length || g.nodeCount < 2) return { graph: g, added: 0 };
+  const mask = WalkMask.fromGraph(g);
+  const dist = new NearDistances(g, o.maxSpanM * o.detourFactor + o.detourExtraM + 20);
+  const extra: RawEdge[] = [];
+  const have = new Set<string>();
+  for (const sp of g.spaces) {
+    const cand: number[] = [];
+    for (let nd = 0; nd < g.nodeCount; nd++) {
+      const x = g.nodeX[nd] as number;
+      const y = g.nodeY[nd] as number;
+      if (inRing(sp.ring, x, y) || distToRing(sp.ring, x, y) <= o.attachM) cand.push(nd);
+    }
+    if (cand.length < 2 || cand.length > 120) continue;
+    const pairs: Array<[number, number, number]> = [];
+    for (let i = 0; i < cand.length; i++)
+      for (let j = i + 1; j < cand.length; j++) {
+        const a = cand[i] as number;
+        const b = cand[j] as number;
+        const d = Math.hypot((g.nodeX[a] as number) - (g.nodeX[b] as number), (g.nodeY[a] as number) - (g.nodeY[b] as number));
+        if (d >= o.minSpanM && d <= o.maxSpanM) pairs.push([d, a, b]);
+      }
+    pairs.sort((p, q) => p[0] - q[0] || p[1] - q[1] || p[2] - q[2]);
+    const used = new Map<number, number>();
+    for (const [d, a, b] of pairs) {
+      if (extra.length >= o.maxLinks) break;
+      if ((used.get(a) ?? 0) >= o.perNode || (used.get(b) ?? 0) >= o.perNode) continue;
+      const key = a < b ? `${a}:${b}` : `${b}:${a}`;
+      if (have.has(key)) continue;
+      const net = dist.from(a).get(b);
+      if (net !== undefined && net <= o.detourFactor * d + o.detourExtraM) continue; // déjà relié de façon raisonnable
+      const ax = g.nodeX[a] as number;
+      const ay = g.nodeY[a] as number;
+      const bx = g.nodeX[b] as number;
+      const by = g.nodeY[b] as number;
+      // le segment doit rester dans l'espace (les 12 premiers et derniers mètres peuvent en sortir : le nœud est en bordure), sans bâtiment
+      const steps = Math.max(2, Math.ceil(d / 1.5));
+      let ok = true;
+      for (let k = 1; k < steps && ok; k++) {
+        const t = k / steps;
+        const x = ax + (bx - ax) * t;
+        const y = ay + (by - ay) * t;
+        const along = Math.min(t * d, (1 - t) * d);
+        if (mask.isBlocked(x, y)) ok = false;
+        else if (along > o.attachM && !inRing(sp.ring, x, y)) ok = false;
+      }
+      if (!ok) continue;
+      have.add(key);
+      used.set(a, (used.get(a) ?? 0) + 1);
+      used.set(b, (used.get(b) ?? 0) + 1);
+      extra.push({ a, b, shape: [{ x: ax, y: ay }, { x: bx, y: by }], cls: EdgeClass.Pedestrian, flags: EdgeFlag.Foot, width: 8, name: sp.name });
+    }
+  }
+  if (!extra.length) return { graph: g, added: 0 };
+  const nodes: Vec2[] = Array.from({ length: g.nodeCount }, (_, i) => ({ x: g.nodeX[i] as number, y: g.nodeY[i] as number }));
+  const edges: RawEdge[] = [];
+  for (let e = 0; e < g.edgeCount; e++) edges.push({ a: g.edgeA[e] as number, b: g.edgeB[e] as number, shape: edgePoints(g, e), cls: g.edgeClass[e] as EdgeClassId, flags: g.edgeFlags[e] as number, width: g.edgeWidth[e] as number, name: g.edgeName[e], osmId: (g.edgeOsmId[e] as number) || undefined });
+  edges.push(...extra);
+  return { graph: buildGraph({ origin: g.origin, nodes, edges, spaces: g.spaces, obstacles: g.obstacles, pois: g.pois, provenance: g.provenance }), added: extra.length };
+}

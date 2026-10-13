@@ -88,3 +88,11 @@ Les paramètres sont `DEFAULT_LINK_OPTIONS`. Déterministe ; environ 1 s pour pl
 - Les **multipolygones** (`type=multipolygon`) de places (`place=square`), zones piétonnes (`highway=pedestrian`), parcs/jardins et bâtiments sont maintenant demandés à Overpass avec leur géométrie (`out geom`) ; leurs anneaux extérieurs sont assemblés à la lecture (trous non gérés). Une grande place cartographiée ainsi (cas fréquent) était auparavant **absente du jeu** : la foule s'amassait dans la rue voisine, ses cellules n'étant pas praticables.
 - Un **petit écart** (≤ 6 m : trottoir, bordure, rangée de potelets) entre une rue et un espace ouvert voisin est comblé (`WalkMask.GAP_BRIDGE_M`) : la place est accessible depuis la rue.
 - Une place **non cartographiée du tout** reste inaccessible aux rassemblements (le jeu ne marche que sur du sol connu : rues, places, parcs). Si une place de votre secteur est absente, indiquez-moi ses étiquettes OSM.
+
+## Traversée des places et zones piétonnes cartographiées en surface
+
+Une place ou zone piétonne (`place=square`, `highway=pedestrian` + `area=yes`, parc) n'a le plus souvent **aucune arête à l'intérieur** : le graphe de navigation ne sait donc pas qu'on peut la traverser, et un cortège la contourne ou refuse d'y passer (exemple : place Saint-Jacques à Metz). `addOpenSpaceLinks` relie par des arêtes piétonnes droites les nœuds du réseau situés dans l'espace ou à ≤ 12 m de son contour, quand le segment reste dans l'espace (hors bâtiment) et que le trajet existant est au moins 1,4 × plus long (+ 25 m). Portée 12–350 m, 5 traversées par nœud au plus. Comme sur toute voie piétonne large, un véhicule peut la traverser au pas.
+
+## Mobilier : OSM d'abord
+
+Les bancs (`amenity=bench`) et poubelles (`amenity=waste_basket`) OSM sont repris tels quels. Si OSM en recense au moins 15 d'un type dans le secteur, la cartographie est jugée complète et **aucun objet synthétique de ce type n'est ajouté** ; sinon les objets synthétiques ne comblent que les manques (à plus de 30 m d'un objet OSM du même type). Paramètres `world.osmFurnitureCoverageMin` et `world.osmFurnitureClearM`.

@@ -90,6 +90,8 @@ export const PARAM_DOCS: ParamDoc[] = [
   { path: 'world.commercialShopCount', group: 'Monde et incidents', unit: 'nombre', meaning: 'Nombre de commerces OSM proches pour qualifier une rue de « commerçante ».', effect: 'Seuil de la catégorie générale de rue ; aucun établissement réel n’est classé ni ciblé.' },
   { path: 'world.commercialRadiusM', group: 'Monde et incidents', unit: 'm', meaning: 'Rayon de comptage des commerces OSM pour la catégorie de rue.', effect: 'Plus grand : davantage de rues sont qualifiées de commerçantes.' },
   { path: 'world.maxDecor', group: 'Monde et incidents', unit: 'objets', meaning: 'Plafond du nombre d’objets de décor générés.', effect: 'Protège la mémoire et le temps de rendu sur de très grandes zones.' },
+  { path: 'world.osmFurnitureCoverageMin', group: 'Monde et incidents', unit: 'objets', meaning: 'Nombre de bancs (ou de poubelles) OSM à partir duquel le mobilier du secteur est jugé complet dans OpenStreetMap.', effect: 'Au-delà, aucun banc (ou poubelle) synthétique n’est ajouté : seuls les objets cartographiés existent. En dessous, des objets synthétiques complètent les manques.' },
+  { path: 'world.osmFurnitureClearM', group: 'Monde et incidents', unit: 'm', meaning: 'Distance minimale d’un banc (ou d’une poubelle) synthétique à un objet OSM du même type.', effect: 'Évite les doublons avec le mobilier cartographié quand la couverture OSM est partielle.' },
   { path: 'world.minOffsetM', group: 'Monde et incidents', unit: 'm', meaning: 'Distance minimale entre un objet de décor et l’axe de la rue.', effect: 'Évite de poser des objets au milieu de la chaussée.' },
 
   // --- incidents (phase 4)
