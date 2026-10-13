@@ -168,8 +168,12 @@ export function classifyPoi(tags: Tags): PoiClass | null {
   return null;
 }
 
-/** Plan d'eau ou berge (fleuve, lac, bassin) : surface où une foule ne peut pas se tenir (hors ponts, qui sont des voies). */
+/**
+ * Plan d'eau, bassin ou fontaine : surface où une foule ne peut pas se tenir (hors ponts, qui sont des voies). Les plans d'eau
+ * temporaires (`intermittent=yes`) et les bassins de fontaine comptent aussi : on ne marche pas dans un bassin.
+ */
 export function isWater(tags: Tags): boolean {
-  if (tags.natural === 'water' && tags.intermittent !== 'yes') return true;
+  if (tags.natural === 'water') return true;
+  if (tags.amenity === 'fountain' || tags.water === 'basin' || tags.water === 'fountain') return true;
   return tags.waterway === 'riverbank' || tags.waterway === 'dock' || tags.landuse === 'reservoir' || tags.landuse === 'basin';
 }

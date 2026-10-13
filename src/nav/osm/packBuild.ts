@@ -61,6 +61,7 @@ export function overpassQuery(b: Bbox, o: { buildings?: boolean; timeoutS?: numb
     // plans d'eau (fleuves, lacs, bassins) : surfaces non praticables
     `way["natural"="water"](${bb});`,
     `way["waterway"="riverbank"](${bb});`,
+    `way["amenity"="fountain"](${bb});`,
   ];
   // lieux d'intérêt (commerces, écoles, établissements, mobilier) : affichage et contexte de rue, jamais des cibles.
   // Nœuds et chemins seulement (pas de relations : requête bien plus légère) ; omis dans la requête allégée des nouvelles tentatives.

@@ -315,6 +315,22 @@ describe('plans d’eau (fleuve) : non praticables, ponts exceptés ; îles et t
     expect(inWater).toBe(0);
   }, 60_000);
 
+  it('bassin de fontaine, eau intermittente : obstacles aussi (on ne marche pas dans un bassin)', () => {
+    const basin = (tags: Record<string, string | undefined>) => {
+      const r = [node(60, 10), node(100, 10), node(100, 30), node(60, 30)];
+      const ids = r.map((x) => x.id);
+      return { elements: [...river([], {}).elements, ...r, { type: 'way', id: 60, nodes: [...ids, ids[0]], tags }] };
+    };
+    const variants: Array<Record<string, string>> = [{ amenity: 'fountain', intermittent: 'yes', natural: 'water', water: 'basin' }, { amenity: 'fountain' }, { natural: 'water', intermittent: 'yes' }, { water: 'basin' }];
+    for (const tags of variants) {
+      const g = buildGraphFromOverpassJson(basin(tags), { origin: O, links: false }).graph;
+      const sim = new Sim({ graph: g, seed: 1 });
+      expect(g.obstacles.some((o) => o.kind === 'water'), JSON.stringify(tags)).toBe(true);
+      expect(sim.mask!.isBlocked(80, 20), JSON.stringify(tags)).toBe(true);
+      expect(sim.mask!.isWalkable(80, 20), JSON.stringify(tags)).toBe(false);
+    }
+  });
+
   it('multipolygone d’eau avec une île : l’île est libre, le reste est de l’eau', () => {
     const ring = (r: number, cx = 0, cy = 0) => [pt(cx - r, cy - r * 0.5), pt(cx + r, cy - r * 0.5), pt(cx + r, cy + r * 0.5), pt(cx - r, cy + r * 0.5), pt(cx - r, cy - r * 0.5)];
     const rel = { type: 'relation', id: 700, tags: { type: 'multipolygon', natural: 'water' }, members: [{ type: 'way', ref: 1, role: 'outer', geometry: ring(250) }, { type: 'way', ref: 2, role: 'inner', geometry: ring(30, 100, 0) }] };
@@ -333,5 +349,6 @@ describe('plans d’eau (fleuve) : non praticables, ponts exceptés ; îles et t
     const q = overpassQuery({ south: 49, west: 6, north: 49.01, east: 6.01 });
     expect(q).toContain('["natural"="water"]');
     expect(q).toContain('riverbank');
+    expect(q).toContain('fountain');
   });
 });

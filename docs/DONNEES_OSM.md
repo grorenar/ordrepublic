@@ -99,7 +99,7 @@ Les bancs (`amenity=bench`) et poubelles (`amenity=waste_basket`) OSM sont repri
 
 ## Plans d'eau (fleuve, lacs) et trous
 
-Les plans d'eau (`natural=water`, `waterway=riverbank`, `landuse=reservoir|basin`), en chemins fermés ou en multipolygones, sont demandés à Overpass et traités comme des **obstacles « eau »** : une foule ne s'y tient pas. Les **ponts** restent praticables (la voie prime sur l'obstacle, sur toute la largeur du pont). Les **anneaux intérieurs** des multipolygones sont gérés : une île d'un plan d'eau est libre, un bassin à l'intérieur d'un parc est exclu de la surface praticable. Avant ce correctif, un fleuve non chargé n'était pas bloqué : un rassemblement proche d'un pont pouvait s'étaler dans l'eau (quai de la Moselle à Metz).
+Les plans d’eau et bassins (`natural=water` même `intermittent=yes`, `water=basin`, `amenity=fountain`, `waterway=riverbank`, `landuse=reservoir|basin`), en chemins fermés ou en multipolygones, sont demandés à Overpass et traités comme des **obstacles « eau »** : une foule ne s'y tient pas. Les **ponts** restent praticables (la voie prime sur l'obstacle, sur toute la largeur du pont). Les **anneaux intérieurs** des multipolygones sont gérés : une île d'un plan d'eau est libre, un bassin à l'intérieur d'un parc est exclu de la surface praticable. Avant ce correctif, un fleuve non chargé n'était pas bloqué : un rassemblement proche d'un pont pouvait s'étaler dans l'eau (quai de la Moselle à Metz).
 
 ## Remarque sur le démarrage d'un cortège
 
